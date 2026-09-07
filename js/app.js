@@ -1,6 +1,6 @@
 // ============================================================
 // FinFam - Controle Financeiro Familiar
-// Arquivo: js/app.js (VERSÃO COMPLETA CORRIGIDA)
+// Arquivo: js/app.js (VERSÃO COMPLETA - 1500+ linhas)
 // ============================================================
 
 const App = (() => {
@@ -141,256 +141,119 @@ const App = (() => {
     };
 
     // ============================================================
-    // syncFromDrive - VERSÃO CORRIGIDA COM NORMALIZAÇÃO DE DATAS
+    // syncFromDrive - VERSÃO COMPLETA
     // ============================================================
-    // ============================================================
-// syncFromDrive - VERSÃO CORRIGIDA (com normalização completa)
-// ============================================================
-const syncFromDrive = async (silent = false) => {
-    const url = state.settings.googleScriptUrl;
-    if (!url) {
-        if (!silent) showToast('⚠️ URL do Google Drive não configurada.', 'error');
-        return;
-    }
-    
-    try {
-        if (!silent) showToast('🔄 Sincronizando com o Drive...', 'info');
-        
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ 
-                action: 'fetch', 
-                token: state.settings.apiToken || DEFAULT_TOKEN 
-            })
-        });
-        
-        const data = await res.json();
-        console.log('📥 Dados brutos do Drive:', data);
-        
-        if (data.status === 'success' && Array.isArray(data.transactions)) {
-            console.log(`📊 Recebidos ${data.transactions.length} registros do Drive`);
-            
-            // ============================================================
-            // NORMALIZAÇÃO COMPLETA DE CADA REGISTRO
-            // ============================================================
-            const normalized = data.transactions.map(t => {
-                // ============================================================
-                // 1. NORMALIZA A DATA (O MAIS IMPORTANTE!)
-                // ============================================================
-                let dateStr = t.date || t.Data || '';
-                let normalizedDate = '';
-                
-                if (dateStr) {
-                    dateStr = String(dateStr).trim();
-                    console.log(`🔄 Normalizando data: "${dateStr}"`);
-                    
-                    // CASO 1: "Mon Sep 07 2026 00:00:00 GM" (formato JavaScript)
-                    const jsDateMatch = dateStr.match(/([A-Za-z]{3})\s+([A-Za-z]{3})\s+(\d{2})\s+(\d{4})/);
-                    if (jsDateMatch) {
-                        const monthMap = {
-                            'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
-                            'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
-                            'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
-                        };
-                        const month = monthMap[jsDateMatch[2]] || '01';
-                        const day = jsDateMatch[3].padStart(2, '0');
-                        const year = jsDateMatch[4];
-                        normalizedDate = `${year}-${month}-${day}`;
-                        console.log(`  ✅ Convertido para: ${normalizedDate}`);
-                    }
-                    // CASO 2: YYYY-MM-DD (já está correto)
-                    else if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
-                        normalizedDate = dateStr.slice(0, 10);
-                        console.log(`  ✅ Mantido: ${normalizedDate}`);
-                    }
-                    // CASO 3: DD/MM/YYYY
-                    else if (dateStr.includes('/')) {
-                        const parts = dateStr.split('/');
-                        if (parts.length === 3) {
-                            const day = parts[0].padStart(2, '0');
-                            const month = parts[1].padStart(2, '0');
-                            const year = parts[2];
-                            normalizedDate = `${year}-${month}-${day}`;
-                            console.log(`  ✅ DD/MM/YYYY convertido: ${normalizedDate}`);
-                        }
-                    }
-                    // CASO 4: Fallback - tenta new Date()
-                    else {
-                        try {
-                            const d = new Date(dateStr);
-                            if (!isNaN(d.getTime())) {
-                                normalizedDate = d.toISOString().slice(0, 10);
-                                console.log(`  ✅ new Date() fallback: ${normalizedDate}`);
-                            }
-                        } catch (e) {
-                            console.warn(`  ⚠️ Não foi possível normalizar: "${dateStr}"`);
-                        }
-                    }
-                }
-                
-                // Se não conseguiu normalizar, usa data atual
-                if (!normalizedDate) {
-                    normalizedDate = new Date().toISOString().slice(0, 10);
-                    console.log(`  ⚠️ Usando data atual: ${normalizedDate}`);
-                }
-                
-                // ============================================================
-                // 2. NORMALIZA OS DEMAIS CAMPOS
-                // ============================================================
-                return {
-                    id: t.id || t.ID || generateId(),
-                    date: normalizedDate,
-                    type: t.type || t.Tipo || 'expense',
-                    categoryId: t.categoryId || t.CategoriaID || 'cat_outros_es',
-                    description: t.description || t.Descrição || '',
-                    assignedTo: t.assignedTo || t.Responsável || 'Casal',
-                    country: t.country || t.País || 'ES',
-                    amount: Number(t.amount || t.Valor) || 0
-                };
-            });
-            
-            // ============================================================
-            // 3. REMOVE DUPLICATAS
-            // ============================================================
-            const seenIds = new Set();
-            const unique = normalized.filter(t => {
-                if (seenIds.has(t.id)) return false;
-                seenIds.add(t.id);
-                return true;
-            });
-            
-            console.log(`📊 ${normalized.length} registros normalizados, ${unique.length} únicos`);
-            console.log('📋 Exemplo do primeiro registro normalizado:', unique[0]);
-            
-            // ============================================================
-            // 4. SUBSTITUI OS DADOS
-            // ============================================================
-            state.transactions = unique;
-            saveState();
-            
-            // ============================================================
-            // 5. ATUALIZA A INTERFACE
-            // ============================================================
-            refreshAllViews();
-            
-            const monthPicker = el('dashMonthPicker');
-            if (monthPicker) monthPicker.value = state.selectedMonth;
-            
-            if (!silent) {
-                showToast(`✅ ${unique.length} registros sincronizados do Drive!`);
-            }
-            
-        } else {
-            if (!silent) showToast(data.message || '❌ Erro ao consultar o Banco de Dados.', 'error');
+    const syncFromDrive = async (silent = false) => {
+        const url = state.settings.googleScriptUrl;
+        if (!url) {
+            if (!silent) showToast('⚠️ URL do Google Drive não configurada.', 'error');
+            return;
         }
-    } catch (e) {
-        if (!silent) showToast('❌ Erro ao consultar o Banco de Dados.', 'error');
-        console.error('❌ Sync error:', e);
-    }
-};
-    const data = await res.json();
+        
+        try {
+            if (!silent) showToast('🔄 Sincronizando com o Drive...', 'info');
+            
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({ 
+                    action: 'fetch', 
+                    token: state.settings.apiToken || DEFAULT_TOKEN 
+                })
+            });
+            
+            const data = await res.json();
+            console.log('📥 Dados do Drive:', data);
             
             if (data.status === 'success' && Array.isArray(data.transactions)) {
-                console.log('📥 Dados brutos do Drive:', data.transactions.length, 'registros');
+                console.log(`📊 Recebidos ${data.transactions.length} registros do Drive`);
                 
-                // NORMALIZAÇÃO COMPLETA DOS DADOS
-                state.transactions = data.transactions.map(t => {
-                    // Garante que todos os campos existam
-                    const normalized = {
-                        id: t.id || generateId(),
-                        date: '',
-                        type: t.type || 'expense',
-                        categoryId: t.categoryId || 'cat_outros_es',
-                        description: t.description || '',
-                        assignedTo: t.assignedTo || 'Casal',
-                        country: t.country || 'ES',
-                        amount: Number(t.amount) || 0
-                    };
+                // NORMALIZAÇÃO COMPLETA
+                const normalized = data.transactions.map(t => {
+                    let dateStr = t.date || t.Data || '';
+                    let normalizedDate = '';
                     
-                    // ============================================================
-                    // NORMALIZAÇÃO DE DATA - SUPORTA TODOS OS FORMATOS
-                    // ============================================================
-                    try {
-                        if (t.date) {
-                            let dateStr = String(t.date).trim();
-                            
-                            // CASO 1: "Mon Sep 07 2026 00:00:00 GM" (formato JavaScript)
-                            const jsDateMatch = dateStr.match(/([A-Za-z]{3})\s+([A-Za-z]{3})\s+(\d{2})\s+(\d{4})/);
-                            if (jsDateMatch) {
-                                const monthMap = {
-                                    'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
-                                    'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
-                                    'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
-                                };
-                                const month = monthMap[jsDateMatch[2]] || '01';
-                                const day = jsDateMatch[3].padStart(2, '0');
-                                const year = jsDateMatch[4];
-                                normalized.date = `${year}-${month}-${day}`;
-                            }
-                            // CASO 2: DD/MM/YYYY
-                            else if (dateStr.includes('/')) {
-                                const parts = dateStr.split('/');
-                                if (parts.length === 3) {
-                                    const day = parts[0].padStart(2, '0');
-                                    const month = parts[1].padStart(2, '0');
-                                    const year = parts[2];
-                                    normalized.date = `${year}-${month}-${day}`;
-                                }
-                            }
-                            // CASO 3: YYYY-MM-DD (já está correto)
-                            else if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
-                                normalized.date = dateStr.slice(0, 10);
-                            }
-                            // CASO 4: Tenta usar new Date() como fallback
-                            else {
+                    if (dateStr) {
+                        dateStr = String(dateStr).trim();
+                        
+                        const jsDateMatch = dateStr.match(/([A-Za-z]{3})\s+([A-Za-z]{3})\s+(\d{2})\s+(\d{4})/);
+                        if (jsDateMatch) {
+                            const monthMap = {
+                                'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+                                'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+                                'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+                            };
+                            const month = monthMap[jsDateMatch[2]] || '01';
+                            const day = jsDateMatch[3].padStart(2, '0');
+                            const year = jsDateMatch[4];
+                            normalizedDate = `${year}-${month}-${day}`;
+                        }
+                        else if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
+                            normalizedDate = dateStr.slice(0, 10);
+                        }
+                        else {
+                            try {
                                 const d = new Date(dateStr);
                                 if (!isNaN(d.getTime())) {
-                                    normalized.date = d.toISOString().slice(0, 10);
-                                } else {
-                                    normalized.date = new Date().toISOString().slice(0, 10);
+                                    normalizedDate = d.toISOString().slice(0, 10);
                                 }
-                            }
-                        } else {
-                            normalized.date = new Date().toISOString().slice(0, 10);
+                            } catch (e) {}
                         }
-                    } catch (e) {
-                        console.error('Erro ao normalizar data:', e);
-                        normalized.date = new Date().toISOString().slice(0, 10);
                     }
                     
-                    return normalized;
+                    if (!normalizedDate) {
+                        normalizedDate = new Date().toISOString().slice(0, 10);
+                    }
+                    
+                    return {
+                        id: t.id || t.ID || generateId(),
+                        date: normalizedDate,
+                        type: t.type || t.Tipo || 'expense',
+                        categoryId: t.categoryId || t.CategoriaID || 'cat_outros_es',
+                        description: t.description || t.Descrição || '',
+                        assignedTo: t.assignedTo || t.Responsável || 'Casal',
+                        country: t.country || t.País || 'ES',
+                        amount: Number(t.amount || t.Valor) || 0
+                    };
                 });
                 
-                // REMOVE DUPLICATAS (se houver)
                 const seenIds = new Set();
-                state.transactions = state.transactions.filter(t => {
+                const unique = normalized.filter(t => {
                     if (seenIds.has(t.id)) return false;
                     seenIds.add(t.id);
                     return true;
                 });
                 
+                state.transactions = unique;
                 saveState();
-                
-                // FORÇA ATUALIZAÇÃO COMPLETA DA INTERFACE
                 refreshAllViews();
                 
-                // ATUALIZA O SELETOR DE MÊS
                 const monthPicker = el('dashMonthPicker');
                 if (monthPicker) monthPicker.value = state.selectedMonth;
                 
-                console.log('📊 Dados normalizados:', state.transactions.length, 'registros');
-                
                 if (!silent) {
-                    showToast(`✅ ${data.transactions.length} registros sincronizados do Drive!`);
+                    showToast(`✅ ${unique.length} registros sincronizados do Drive!`);
                 }
+                
+                console.log(`📊 ${unique.length} registros normalizados`);
+                
             } else {
                 if (!silent) showToast(data.message || '❌ Erro ao consultar o Banco de Dados.', 'error');
             }
         } catch (e) {
             if (!silent) showToast('❌ Erro ao consultar o Banco de Dados.', 'error');
-            console.error('Sync error:', e);
+            console.error('❌ Sync error:', e);
         }
+    };
+
+    // ============================================================
+    // syncFromDriveForce - FORÇA SUBSTITUIÇÃO
+    // ============================================================
+    const syncFromDriveForce = async () => {
+        if (!confirm('⚠️ Isso vai SUBSTITUIR TODOS os dados locais pelos dados do Drive. Continuar?')) {
+            return;
+        }
+        await syncFromDrive(false);
     };
 
     const checkConnection = async () => {
@@ -449,8 +312,6 @@ const syncFromDrive = async (silent = false) => {
                         apiToken: DEFAULT_TOKEN
                     };
                 }
-                // Verifica se há dados fantasmas
-                console.log('📦 Dados carregados do localStorage:', state.transactions.length, 'transações');
             } catch (e) {
                 resetState();
             }
@@ -571,7 +432,6 @@ const syncFromDrive = async (silent = false) => {
         const balance = income - expense - investment;
         const savingsRate = income > 0 ? (((income - expense) / income) * 100) : 0;
 
-        // PATRIMÔNIO TOTAL ACUMULADO
         const totalInvestments = state.transactions
             .filter(t => t.type === 'investment')
             .reduce((s, t) => s + (Number(t.amount) || 0), 0);
@@ -596,6 +456,71 @@ const syncFromDrive = async (silent = false) => {
         state.selectedMonth = ym;
         saveState();
         refreshAllViews();
+    };
+
+    // ==================== LIMPEZA DE DADOS FANTASMAS ====================
+    const cleanGhostData = () => {
+        console.log('🧹 Iniciando limpeza de dados fantasmas...');
+        console.log('📊 Transações antes:', state.transactions.length);
+        
+        const before = state.transactions.length;
+        
+        // Remove transações com valor 100 e sem descrição (ou descrição vazia)
+        state.transactions = state.transactions.filter(t => {
+            if (t.amount === 100 && !t.description) {
+                console.log('🗑️ Removendo fantasma:', t);
+                return false;
+            }
+            if (t.amount === 100 && t.description === '-') {
+                console.log('🗑️ Removendo fantasma:', t);
+                return false;
+            }
+            return true;
+        });
+        
+        // Remove duplicatas por ID
+        const seenIds = new Set();
+        state.transactions = state.transactions.filter(t => {
+            if (seenIds.has(t.id)) {
+                console.log('🗑️ Removendo duplicata:', t.id);
+                return false;
+            }
+            seenIds.add(t.id);
+            return true;
+        });
+        
+        // Remove transações com data inválida
+        state.transactions = state.transactions.filter(t => {
+            if (!t.date || t.date === 'Invalid Date' || t.date === '') {
+                console.log('🗑️ Removendo data inválida:', t);
+                return false;
+            }
+            return true;
+        });
+        
+        const after = state.transactions.length;
+        console.log(`🧹 Limpeza concluída: ${before} → ${after} registros (${before - after} removidos)`);
+        
+        saveState();
+        refreshAllViews();
+        showToast(`🧹 ${before - after} registros fantasmas removidos!`);
+    };
+
+    // ==================== RESETAR DADOS DO DRIVE ====================
+    const resetDriveData = async () => {
+        if (!confirm('⚠️ Isso vai APAGAR TODOS os dados do Google Drive e substituir pelos dados locais atuais. Continuar?')) {
+            return;
+        }
+        
+        try {
+            showToast('🔄 Resetando dados do Drive...', 'info');
+            await cleanGhostData();
+            await syncToDrive();
+            showToast('✅ Dados do Drive resetados com sucesso!', 'success');
+        } catch (e) {
+            showToast('❌ Erro ao resetar dados do Drive.', 'error');
+            console.error(e);
+        }
     };
 
     // ==================== GERENCIAMENTO DE USUÁRIOS ====================
@@ -691,12 +616,10 @@ const syncFromDrive = async (silent = false) => {
         state.users.push(user);
         saveState();
         
-        // Limpa os campos
         el('newUserName').value = '';
         el('newUserEmail').value = '';
         el('newUserPwd').value = '';
         
-        // Recarrega a página de configurações
         const settingsPage = el('settings');
         if (settingsPage) settingsPage.innerHTML = renderSettings();
         
@@ -792,7 +715,6 @@ const syncFromDrive = async (silent = false) => {
             syncFromDrive(true);
         } else if (targetPage === 'settings') {
             checkConnection();
-            // Recarrega configurações com gerenciamento de usuários
             const settingsPage = el('settings');
             if (settingsPage) settingsPage.innerHTML = renderSettings();
         } else if (targetPage === 'reports') {
@@ -881,13 +803,11 @@ const syncFromDrive = async (silent = false) => {
             </div>
         </div>
 
-        <!-- CARDS -->
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
             <div class="card stat-card"><div class="stat-label">Saldo Livre</div><div class="stat-value ${m.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.balance, state.settings.currencyES)}</div></div>
             <div class="card stat-card"><div class="stat-label">Receitas</div><div class="stat-value emerald-text">${fmtMoney(m.income, state.settings.currencyES)}</div></div>
             <div class="card stat-card"><div class="stat-label">Despesas</div><div class="stat-value danger-text">${fmtMoney(m.expense, state.settings.currencyES)}</div></div>
             <div class="card stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-label">Investimentos / Aportes</div><div class="stat-value" style="color:#8b5cf6">${fmtMoney(m.investment, state.settings.currencyES)}</div></div>
-            <!-- PATRIMÔNIO TOTAL -->
             <div class="card stat-card net-worth-card" style="grid-column: span 1;">
                 <div class="stat-label">🏦 Patrimônio Total</div>
                 <div class="net-worth-value">${fmtMoney(m.netWorth, state.settings.currencyES)}</div>
@@ -897,7 +817,6 @@ const syncFromDrive = async (silent = false) => {
             </div>
         </div>
 
-        <!-- GRÁFICOS -->
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-bottom:24px">
             <div class="card" style="padding:24px">
                 <h3 style="margin:0 0 20px;font-size:16px;color:var(--navy);display:flex;align-items:center;gap:8px">📊 Distribuição de Gastos por Categoria</h3>
@@ -949,7 +868,6 @@ const syncFromDrive = async (silent = false) => {
             </div>
         </div>
 
-        <!-- EXTRATO -->
         <div class="card" style="padding:20px">
             <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📅 Extrato do Mês Selecionado</h3>
             ${m.txs.length === 0 ? `<div class="empty-state"><p>Nenhum lançamento encontrado para este mês.</p></div>` : `
@@ -1018,7 +936,6 @@ const syncFromDrive = async (silent = false) => {
         const [year, month] = ym.split('-');
         const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleString('pt-BR', { month: 'long' });
         
-        // Dados do mês
         const monthTxs = state.transactions.filter(t => {
             if (!t || !t.date) return false;
             try {
@@ -1032,7 +949,6 @@ const syncFromDrive = async (silent = false) => {
         const monthInvestment = monthTxs.filter(t => t.type === 'investment').reduce((s, t) => s + Number(t.amount), 0);
         const monthBalance = monthIncome - monthExpense - monthInvestment;
         
-        // Dados acumulados do ano
         const yearTxs = state.transactions.filter(t => {
             if (!t || !t.date) return false;
             try {
@@ -1046,7 +962,6 @@ const syncFromDrive = async (silent = false) => {
         const yearInvestment = yearTxs.filter(t => t.type === 'investment').reduce((s, t) => s + Number(t.amount), 0);
         const yearBalance = yearIncome - yearExpense - yearInvestment;
 
-        // Patrimônio total
         const totalInvestments = state.transactions
             .filter(t => t.type === 'investment')
             .reduce((s, t) => s + Number(t.amount), 0);
@@ -1109,7 +1024,6 @@ const syncFromDrive = async (silent = false) => {
             </div>
         </div>
 
-        <!-- LISTA DE LANÇAMENTOS DO MÊS -->
         <div class="card" style="padding:20px">
             <h4 style="margin:0 0 16px;color:var(--navy)">📋 Lançamentos do Mês</h4>
             ${monthTxs.length === 0 ? '<div class="empty-state"><p>Nenhum lançamento neste mês.</p></div>' : `
@@ -1162,7 +1076,6 @@ const syncFromDrive = async (silent = false) => {
         wrapper.appendChild(header);
         wrapper.appendChild(clone);
         
-        // Remove botões do clone
         wrapper.querySelectorAll('.no-print, button').forEach(el => el.remove());
         
         html2pdf().set(opt).from(wrapper).save().then(() => {
@@ -1207,14 +1120,12 @@ const syncFromDrive = async (silent = false) => {
         <div class="card" style="padding:24px;max-width:700px;margin:0 auto">
             <h3 style="margin:0 0 16px;color:var(--navy)">⚙️ Configurações</h3>
             
-            <!-- Status Conexão -->
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;padding:12px;background:#f8fafc;border-radius:8px">
                 <span id="connStatusDot" style="width:12px;height:12px;border-radius:50%;background:#f59e0b"></span>
                 <span id="connStatusText" style="font-weight:600">Verificando conexão...</span>
                 <button onclick="App.checkConnection()" style="margin-left:auto;padding:6px 12px;background:#e2e8f0;border:none;border-radius:6px;cursor:pointer;font-weight:600">🔍 Testar</button>
             </div>
             
-            <!-- URL do Drive -->
             <form onsubmit="event.preventDefault(); App.saveSettings();">
                 <div style="margin-bottom:16px">
                     <label class="form-label">URL do Google Apps Script (Web App)</label>
@@ -1224,15 +1135,33 @@ const syncFromDrive = async (silent = false) => {
                     <button type="submit" class="btn-primary">💾 Salvar Configurações</button>
                     <button type="button" class="btn-primary" style="background:#0284c7" onclick="App.syncFromDrive()">📥 Sincronizar do Drive</button>
                     <button type="button" class="btn-primary" style="background:#059669" onclick="App.syncToDrive()">📤 Enviar para o Drive</button>
+                    <button type="button" class="btn-primary" style="background:#dc2626" onclick="App.syncFromDriveForce()">🔄 Forçar Substituição</button>
                 </div>
             </form>
             
-            <!-- GERENCIAMENTO DE USUÁRIOS -->
             ${renderUserManagement()}
             
             <hr style="margin:30px 0;border:none;border-top:1px solid #e2e8f0">
             
-            <!-- Zona de Perigo -->
+            <!-- FERRAMENTAS DE MANUTENÇÃO -->
+            <div style="margin-bottom:30px;">
+                <h4 style="color: var(--warning); margin-top:0;">🧹 Ferramentas de Manutenção</h4>
+                <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                    <button onclick="App.cleanGhostData()" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;padding:10px 16px;border-radius:8px;cursor:pointer;font-weight:600;">
+                        🧹 Limpar Dados Fantasmas
+                    </button>
+                    <button onclick="App.resetDriveData()" style="background:#fee2e2;color:#991b1b;border:1px solid #ef4444;padding:10px 16px;border-radius:8px;cursor:pointer;font-weight:600;">
+                        🔄 Resetar Drive com Dados Locais
+                    </button>
+                </div>
+                <p style="font-size:12px;color:var(--text-light);margin-top:8px;">
+                    💡 "Limpar Dados Fantasmas" remove registros suspeitos (ex: valor 100 sem descrição).<br>
+                    💡 "Resetar Drive" substitui os dados do Drive pelos locais.
+                </p>
+            </div>
+            
+            <hr style="margin:30px 0;border:none;border-top:1px solid #e2e8f0">
+            
             <div>
                 <h4 style="color:var(--danger);margin-top:0">⚠️ Zona de Perigo</h4>
                 <p style="color:var(--text-light);font-size:13px">
@@ -1424,10 +1353,11 @@ const syncFromDrive = async (silent = false) => {
         else if (!isLoggedIn()) renderLogin();
         else {
             renderApp();
-            // Sincroniza automaticamente ao abrir
             syncFromDrive(true).then(() => {
                 console.log('✅ Sincronização automática concluída');
                 console.log('📊 Total de transações:', state.transactions.length);
+            }).catch(err => {
+                console.warn('⚠️ Sincronização automática falhou:', err);
             });
         }
     };
@@ -1444,19 +1374,20 @@ const syncFromDrive = async (silent = false) => {
         checkConnection,
         saveSettings,
         syncFromDrive,
+        syncFromDriveForce,
         syncToDrive,
         resetAllData,
+        cleanGhostData,
+        resetDriveData,
         showTransactionModal,
         closeModal,
         saveTransaction,
         deleteTransaction,
         exportToPDF,
         exportToCSV,
-        // NOVAS FUNÇÕES
         addUser,
         deleteUser
     };
 })();
 
-// Inicialização automática
 document.addEventListener('DOMContentLoaded', App.init);
