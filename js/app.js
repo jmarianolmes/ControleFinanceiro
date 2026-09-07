@@ -2,7 +2,7 @@ const App = (() => {
     const STORAGE_KEY = 'finfam_data_v1';
     const SESSION_KEY = 'finfam_session';
     const DEFAULT_TOKEN = 'FinFam_SecureToken_2026_@Key';
-    const INACTIVITY_TIMEOUT = 15 * 60 * 1000; // 15 minutos
+    const INACTIVITY_TIMEOUT = 15 * 60 * 1000;
 
     let state = {
         users: [],
@@ -11,10 +11,10 @@ const App = (() => {
         settings: { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '', apiToken: DEFAULT_TOKEN },
         currentUser: null,
         sessionExpiry: null,
-        privacyMode: false
+        privacyMode: false,
+        selectedMonth: new Date().toISOString().slice(0, 7) // 'YYYY-MM'
     };
 
-    let charts = {};
     let inactivityTimer = null;
 
     const el = id => document.getElementById(id);
@@ -90,13 +90,13 @@ const App = (() => {
         { id: 'cat_utensilios', name: 'Utensílios / Casa', type: 'expense', country: 'ES', icon: '📦' },
         { id: 'cat_trabalho', name: 'Materiais de Trabalho', type: 'expense', country: 'ES', icon: '💻' },
         { id: 'cat_lazer', name: 'Lazer & Família', type: 'expense', country: 'ES', icon: '🎬' },
-        { id: 'cat_outros_es', name: 'Outros Despesas', type: 'expense', country: 'ES', icon: '📋' },
+        { id: 'cat_outros_es', name: 'Outras Despesas', type: 'expense', country: 'ES', icon: '📋' },
         { id: 'cat_cc_br', name: 'Cartão de Crédito', type: 'expense', country: 'BR', icon: '💳' },
         { id: 'cat_impostos_br', name: 'Impostos / Taxas', type: 'expense', country: 'BR', icon: '🧾' },
         { id: 'cat_outros_br', name: 'Compromissos Diversos', type: 'expense', country: 'BR', icon: '🇧🇷' }
     ];
 
-    // --- COMUNICAÇÃO SEGURA COM GOOGLE DRIVE ---
+    // --- COMUNICAÇÃO DRIVE ---
     const syncToDrive = async () => {
         const url = state.settings.googleScriptUrl;
         if (!url) return;
@@ -122,9 +122,12 @@ const App = (() => {
         }
     };
 
-    const syncFromDrive = async () => {
+    const syncFromDrive = async (silent = false) => {
         const url = state.settings.googleScriptUrl;
-        if (!url) { showToast('URL do Drive não configurada.', 'error'); return; }
+        if (!url) { 
+            if (!silent) showToast('URL do Drive não configurada.', 'error'); 
+            return; 
+        }
         try {
             const res = await fetch(url, {
                 method: 'POST',
@@ -138,14 +141,59 @@ const App = (() => {
             if (data.status === 'success' && data.transactions) {
                 state.transactions = data.transactions;
                 saveState();
-                renderApp();
-                showToast('Dados atualizados do Google Drive!');
-            } else if (data.message) {
+                
+                const activePage = document.querySelector('.page.active')?.id;
+                if (activePage === 'dashboard') {
+                    const dash = el('dashboard');
+                    if (dash) dash.innerHTML = renderDashboard();
+                } else if (activePage === 'transactions') {
+                    const txTable = el('transactionsTable');
+                    if (txTable) txTable.innerHTML = renderTransactionsTable();
+                }
+
+                if (!silent) showToast('Dados atualizados do Google Drive!');
+            } else if (data.message && !silent) {
                 showToast(data.message, 'error');
             }
         } catch (e) {
             console.error('Erro ao buscar do Drive:', e);
-            showToast('Erro ao consultar o Google Drive.', 'error');
+            if (!silent) showToast('Erro ao consultar o Google Drive.', 'error');
+        }
+    };
+
+    const checkConnection = async () => {
+        const dot = el('connStatusDot');
+        const text = el('connStatusText');
+        const url = state.settings.googleScriptUrl;
+
+        if (!dot || !text) return;
+
+        if (!url) {
+            dot.style.backgroundColor = '#ef4444';
+            text.textContent = 'URL não configurada';
+            return;
+        }
+
+        text.textContent = 'Verificando...';
+        dot.style.backgroundColor = '#f59e0b';
+
+        try {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({ action: 'fetch', token: state.settings.apiToken || DEFAULT_TOKEN })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                dot.style.backgroundColor = '#10b981';
+                text.textContent = 'Conectado ao Google Drive';
+            } else {
+                dot.style.backgroundColor = '#ef4444';
+                text.textContent = 'Erro na validação do Token';
+            }
+        } catch (e) {
+            dot.style.backgroundColor = '#ef4444';
+            text.textContent = 'Desconectado / Erro de Rede';
         }
     };
 
@@ -155,6 +203,7 @@ const App = (() => {
             try {
                 state = JSON.parse(raw);
                 state.categories = [...defaultCategories];
+                if (!state.selectedMonth) state.selectedMonth = new Date().toISOString().slice(0, 7);
                 if (!state.settings) state.settings = { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '', apiToken: DEFAULT_TOKEN };
             } catch (e) { resetState(); }
         } else { resetState(); }
@@ -164,7 +213,7 @@ const App = (() => {
         state = {
             users: [], transactions: [], categories: [...defaultCategories],
             settings: { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '', apiToken: DEFAULT_TOKEN },
-            currentUser: null, sessionExpiry: null, privacyMode: false
+            currentUser: null, sessionExpiry: null, privacyMode: false, selectedMonth: new Date().toISOString().slice(0, 7)
         };
         saveState();
     };
@@ -215,8 +264,6 @@ const App = (() => {
         renderApp();
     };
 
-    const getCurrentMonth = () => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() + 1 }; };
-
     const filterTransactionsByRange = (startDate, endDate) => {
         return state.transactions.filter(t => {
             if (!t.date) return false;
@@ -226,13 +273,19 @@ const App = (() => {
         }).sort((a, b) => new Date(b.date) - new Date(a.date));
     };
 
-    const getMonthTotals = (year, month) => {
-        const start = new Date(year, month - 1, 1).toISOString().split('T')[0];
-        const end = new Date(year, month, 0).toISOString().split('T')[0];
-        const txs = filterTransactionsByRange(start, end);
+    const getSelectedMonthData = () => {
+        const ym = state.selectedMonth; // 'YYYY-MM'
+        const txs = state.transactions.filter(t => t.date && t.date.startsWith(ym)).sort((a, b) => new Date(b.date) - new Date(a.date));
         const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
         const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
-        return { income, expense, balance: income - expense, count: txs.length };
+        return { income, expense, balance: income - expense, count: txs.length, txs };
+    };
+
+    const changeSelectedMonth = (ym) => {
+        if (!ym) return;
+        state.selectedMonth = ym;
+        saveState();
+        renderApp();
     };
 
     const doSetup = async () => {
@@ -268,6 +321,12 @@ const App = (() => {
         const targetPage = element.getAttribute('data-page');
         const p = el(targetPage);
         if (p) p.classList.add('active');
+
+        if (targetPage === 'dashboard') {
+            syncFromDrive(true);
+        } else if (targetPage === 'settings') {
+            checkConnection();
+        }
     };
 
     const renderLogin = () => {
@@ -340,38 +399,34 @@ const App = (() => {
         </div>
         <div id="modalOverlay" class="modal-overlay"><div id="modalContent" class="modal"></div></div>
         <div id="toast" class="toast"></div>`;
-
-        renderDashboardCharts();
     };
 
     const renderDashboard = () => {
-        const { year, month } = getCurrentMonth();
-        const totals = getMonthTotals(year, month);
-        const recent = state.transactions.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
-        
+        const m = getSelectedMonthData();
+
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
             <div>
                 <h2 style="margin:0;font-size:22px;color:var(--navy)">Dashboard</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Resumo do mês atual</p>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Resumo do Mês Selecionado</p>
             </div>
-            <div style="display:flex;gap:10px">
-                <button class="btn-primary" style="background:#0284c7" onclick="App.syncFromDrive()">🔄 Atualizar do Drive</button>
+            <div style="display:flex;gap:10px;align-items:center">
+                <input type="month" id="dashMonthPicker" class="input-field" style="padding:8px 12px;font-weight:600;color:var(--navy)" value="${state.selectedMonth}" onchange="App.changeSelectedMonth(this.value)">
                 <button class="btn-primary" onclick="App.showAddTransactionModal()">+ Novo Lançamento</button>
             </div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px">
-            <div class="card stat-card"><div class="stat-label">Saldo do Mês</div><div class="stat-value ${totals.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(totals.balance, state.settings.currencyES)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Entradas</div><div class="stat-value emerald-text">${fmtMoney(totals.income, state.settings.currencyES)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Saídas</div><div class="stat-value danger-text">${fmtMoney(totals.expense, state.settings.currencyES)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Total Registros</div><div class="stat-value" style="color:var(--navy)">${totals.count}</div></div>
+            <div class="card stat-card"><div class="stat-label">Saldo do Mês</div><div class="stat-value ${m.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.balance, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Entradas</div><div class="stat-value emerald-text">${fmtMoney(m.income, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Saídas</div><div class="stat-value danger-text">${fmtMoney(m.expense, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Total Registros</div><div class="stat-value" style="color:var(--navy)">${m.count}</div></div>
         </div>
         <div class="card" style="padding:20px">
-            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">🕐 Últimas Movimentações</h3>
-            ${recent.length === 0 ? `<div class="empty-state"><p>Nenhum lançamento cadastrado.</p></div>` : `
+            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📅 Lançamentos do Mês (${m.txs.length})</h3>
+            ${m.txs.length === 0 ? `<div class="empty-state"><p>Nenhum lançamento encontrado para este mês.</p></div>` : `
             <div class="table-container">
                 <table class="data-table">
                     <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
-                    <tbody>${recent.map(t => renderTransactionRow(t)).join('')}</tbody>
+                    <tbody>${m.txs.map(t => renderTransactionRow(t)).join('')}</tbody>
                 </table>
             </div>`}
         </div>`;
@@ -393,8 +448,6 @@ const App = (() => {
             </td>
         </tr>`;
     };
-
-    const renderDashboardCharts = () => {};
 
     const renderTransactions = () => {
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
@@ -546,20 +599,31 @@ const App = (() => {
     const renderSettings = () => {
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
             <div>
-                <h2 style="margin:0;font-size:22px;color:var(--navy)">Configurações & Segurança</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Conexão com Google Drive</p>
+                <h2 style="margin:0;font-size:22px;color:var(--navy)">Configurações & Conexão</h2>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Gerenciamento do Google Drive</p>
             </div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:16px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px">
             <div class="card" style="padding:24px">
-                <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">🔗 Conexão Google Drive</h3>
+                <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📡 Status da Conexão</h3>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;background:#f8fafc;padding:12px 16px;border-radius:10px;border:1px solid #e2e8f0">
+                    <span id="connStatusDot" style="width:14px;height:14px;border-radius:50%;background-color:#ef4444;display:inline-block"></span>
+                    <span id="connStatusText" style="font-weight:600;font-size:14px;color:var(--navy)">Verificando status...</span>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                    <button type="button" class="btn-primary" style="background:#0284c7" onclick="App.checkConnection()">⚡ Testar Conexão</button>
+                    <button type="button" class="btn-primary" style="background:#059669" onclick="App.syncFromDrive()">🔄 Atualizar do Drive Agora</button>
+                </div>
+            </div>
+            <div class="card" style="padding:24px">
+                <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">🔑 Credenciais da API</h3>
                 <form onsubmit="event.preventDefault(); App.saveSettings();">
                     <div class="form-group">
-                        <label class="form-label">URL do Web App (Google Apps Script)</label>
+                        <label class="form-label">URL do Google Apps Script</label>
                         <input type="url" id="googleScriptUrl" class="input-field" value="${state.settings.googleScriptUrl || ''}" placeholder="https://script.google.com/macros/s/.../exec">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">Token da API</label>
+                        <label class="form-label">Token de Segurança</label>
                         <input type="text" id="apiToken" class="input-field" value="${state.settings.apiToken || DEFAULT_TOKEN}">
                     </div>
                     <button type="submit" class="btn-primary" style="width:100%">Salvar Configurações</button>
@@ -575,6 +639,7 @@ const App = (() => {
         state.settings.apiToken = token || DEFAULT_TOKEN;
         saveState();
         showToast('Configurações salvas!');
+        checkConnection();
     };
 
     const showAddTransactionModal = () => {
@@ -708,6 +773,7 @@ const App = (() => {
             renderLogin();
         } else {
             renderApp();
+            syncFromDrive(true);
         }
     };
 
@@ -720,6 +786,8 @@ const App = (() => {
         togglePrivacy,
         syncFromDrive,
         syncToDrive,
+        checkConnection,
+        changeSelectedMonth,
         exportToExcel,
         updateReportView,
         resetAllData,
