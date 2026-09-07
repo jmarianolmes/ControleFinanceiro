@@ -12,7 +12,7 @@ const App = (() => {
         currentUser: null,
         sessionExpiry: null,
         privacyMode: false,
-        selectedMonth: new Date().toISOString().slice(0, 7) // 'YYYY-MM'
+        selectedMonth: new Date().toISOString().slice(0, 7)
     };
 
     let inactivityTimer = null;
@@ -21,7 +21,7 @@ const App = (() => {
 
     const fmtDate = d => {
         if (!d) return '-';
-        const parts = d.split('-');
+        const parts = String(d).split('-');
         if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
         return new Date(d).toLocaleDateString('pt-BR');
     };
@@ -71,8 +71,11 @@ const App = (() => {
         { id: 'cat_salario_es', name: 'Salário / Emprego', type: 'income', country: 'ES', icon: '💼' },
         { id: 'cat_freelance_es', name: 'Trabalho Freelance / Extras', type: 'income', country: 'ES', icon: '💻' },
         { id: 'cat_outras_entradas_es', name: 'Outras Receitas', type: 'income', country: 'ES', icon: '💶' },
+        { id: 'cat_rendimentos', name: 'Rendimentos & Dividendos', type: 'income', country: 'ES', icon: '💰' },
         { id: 'cat_aluguel_br', name: 'Receita Aluguel', type: 'income', country: 'BR', icon: '🏠' },
         { id: 'cat_outras_entradas_br', name: 'Outras Receitas', type: 'income', country: 'BR', icon: '🇧🇷' },
+        { id: 'cat_invest_es', name: 'Investimentos & Ações (ES)', type: 'investment', country: 'ES', icon: '📈' },
+        { id: 'cat_invest_br', name: 'Investimentos & Tesouro (BR)', type: 'investment', country: 'BR', icon: '🇧🇷' },
         { id: 'cat_aluguel_es', name: 'Aluguel de Moradia', type: 'expense', country: 'ES', icon: '🔑' },
         { id: 'cat_hipoteca_es', name: 'Hipoteca / Financiamento', type: 'expense', country: 'ES', icon: '🏛️' },
         { id: 'cat_comunidad', name: 'Comunidad / Condomínio', type: 'expense', country: 'ES', icon: '🏢' },
@@ -138,19 +141,19 @@ const App = (() => {
                 })
             });
             const data = await res.json();
-            if (data.status === 'success' && data.transactions) {
+            if (data.status === 'success' && Array.isArray(data.transactions)) {
                 state.transactions = data.transactions;
                 saveState();
                 
                 const activePage = document.querySelector('.page.active')?.id;
-                if (activePage === 'dashboard') {
+                if (activePage === 'dashboard' || !activePage) {
                     const dash = el('dashboard');
                     if (dash) dash.innerHTML = renderDashboard();
                 } else if (activePage === 'transactions') {
                     const txTable = el('transactionsTable');
                     if (txTable) txTable.innerHTML = renderTransactionsTable();
                 } else if (activePage === 'reports') {
-                    updateReportView();
+                    if (typeof updateReportView === 'function') updateReportView();
                 }
 
                 if (!silent) showToast('Dados atualizados do Google Drive!');
@@ -268,26 +271,37 @@ const App = (() => {
 
     const filterTransactionsByRange = (startDate, endDate) => {
         return state.transactions.filter(t => {
-            if (!t.date) return false;
-            if (startDate && t.date < startDate) return false;
-            if (endDate && t.date > endDate) return false;
+            if (!t || !t.date) return false;
+            const d = String(t.date).trim();
+            if (startDate && d < startDate) return false;
+            if (endDate && d > endDate) return false;
             return true;
         }).sort((a, b) => new Date(b.date) - new Date(a.date));
     };
 
     const getSelectedMonthData = () => {
         const ym = state.selectedMonth; // 'YYYY-MM'
-        const txs = state.transactions.filter(t => t.date && t.date.startsWith(ym)).sort((a, b) => new Date(b.date) - new Date(a.date));
+        const txs = state.transactions.filter(t => {
+            if (!t || !t.date) return false;
+            return String(t.date).trim().startsWith(ym);
+        }).sort((a, b) => new Date(b.date) - new Date(a.date));
+
         const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
         const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
-        return { income, expense, balance: income - expense, count: txs.length, txs };
+        const investment = txs.filter(t => t.type === 'investment').reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        
+        const balance = income - expense - investment;
+        const savingsRate = income > 0 ? Math.max(0, (((income - expense) / income) * 100)) : 0;
+
+        return { income, expense, investment, balance, savingsRate, count: txs.length, txs };
     };
 
     const changeSelectedMonth = (ym) => {
         if (!ym) return;
         state.selectedMonth = ym;
         saveState();
-        renderApp();
+        const dash = el('dashboard');
+        if (dash) dash.innerHTML = renderDashboard();
     };
 
     const doSetup = async () => {
@@ -402,35 +416,101 @@ const App = (() => {
             <div id="reports" class="page">${renderReports()}</div>
             <div id="settings" class="page">${renderSettings()}</div>
         </div>
-        <div id="modalOverlay" class="modal-overlay"><div id="modalContent" class="modal"></div></div>
+        <div id="modalOverlay" class="modal-overlay" style="display:none"><div id="modalContent" class="modal"></div></div>
         <div id="toast" class="toast"></div>`;
     };
 
     const renderDashboard = () => {
         const m = getSelectedMonthData();
 
+        // Agrupamento por Categoria para Estatística
+        const expByCategory = {};
+        m.txs.filter(t => t.type === 'expense').forEach(t => {
+            const cat = state.categories.find(c => c.id === t.categoryId)?.name || 'Outros';
+            expByCategory[cat] = (expByCategory[cat] || 0) + (Number(t.amount) || 0);
+        });
+
+        const sortedExpCats = Object.entries(expByCategory).sort((a, b) => b[1] - a[1]);
+
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
             <div>
-                <h2 style="margin:0;font-size:22px;color:var(--navy)">Dashboard</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Resumo do Mês Selecionado</p>
+                <h2 style="margin:0;font-size:22px;color:var(--navy)">Dashboard Principal</h2>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Resumo executivo financeiro</p>
             </div>
             <div style="display:flex;gap:10px;align-items:center">
                 <input type="month" id="dashMonthPicker" class="input-field" style="padding:8px 12px;font-weight:600;color:var(--navy)" value="${state.selectedMonth}" onchange="App.changeSelectedMonth(this.value)">
                 <button class="btn-primary" onclick="App.showAddTransactionModal()">+ Novo Lançamento</button>
             </div>
         </div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px">
-            <div class="card stat-card"><div class="stat-label">Saldo do Mês</div><div class="stat-value ${m.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.balance, state.settings.currencyES)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Entradas</div><div class="stat-value emerald-text">${fmtMoney(m.income, state.settings.currencyES)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Saídas</div><div class="stat-value danger-text">${fmtMoney(m.expense, state.settings.currencyES)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Total Registros</div><div class="stat-value" style="color:var(--navy)">${m.count}</div></div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+            <div class="card stat-card"><div class="stat-label">Saldo Líquido</div><div class="stat-value ${m.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.balance, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Entradas (Receitas)</div><div class="stat-value emerald-text">${fmtMoney(m.income, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Saídas (Despesas)</div><div class="stat-value danger-text">${fmtMoney(m.expense, state.settings.currencyES)}</div></div>
+            <div class="card stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-label">Investimentos / Aportes 📈</div><div class="stat-value" style="color:#7c3aed">${fmtMoney(m.investment, state.settings.currencyES)}</div></div>
+            <div class="card stat-card" style="border-left:4px solid #0284c7"><div class="stat-label">Eficiência Financeira 🎯</div><div class="stat-value" style="color:#0284c7">${m.savingsRate.toFixed(1)}%</div></div>
         </div>
+
+        <!-- SEÇÃO DE ESTATÍSTICAS E GRÁFICOS AVANÇADOS -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-bottom:24px">
+            <div class="card" style="padding:20px">
+                <h3 style="margin:0 0 16px;font-size:15px;color:var(--navy);display:flex;align-items:center;gap:8px">📊 Distribuição de Gastos por Categoria</h3>
+                ${sortedExpCats.length === 0 ? '<p style="color:var(--text-light);font-size:13px">Nenhum gasto registrado neste mês.</p>' : 
+                    sortedExpCats.slice(0, 5).map(([cat, val]) => {
+                        const pct = m.expense > 0 ? ((val / m.expense) * 100).toFixed(1) : 0;
+                        return `<div style="margin-bottom:12px">
+                            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px;font-weight:600">
+                                <span>${cat}</span>
+                                <span>${fmtMoney(val, state.settings.currencyES)} (${pct}%)</span>
+                            </div>
+                            <div style="width:100%;background:#e2e8f0;height:8px;border-radius:4px;overflow:hidden">
+                                <div style="width:${pct}%;background:var(--danger);height:100%;border-radius:4px"></div>
+                            </div>
+                        </div>`;
+                    }).join('')
+                }
+            </div>
+
+            <div class="card" style="padding:20px">
+                <h3 style="margin:0 0 16px;font-size:15px;color:var(--navy);display:flex;align-items:center;gap:8px">⚖️ Balanço do Mês (Entradas vs Destino)</h3>
+                <div style="margin-bottom:16px">
+                    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+                        <span>Despesas (${m.income > 0 ? ((m.expense / m.income) * 100).toFixed(1) : 0}%)</span>
+                        <span style="font-weight:600">${fmtMoney(m.expense, state.settings.currencyES)}</span>
+                    </div>
+                    <div style="width:100%;background:#e2e8f0;height:10px;border-radius:5px;overflow:hidden">
+                        <div style="width:${Math.min(100, m.income > 0 ? (m.expense / m.income) * 100 : 0)}%;background:#ef4444;height:100%"></div>
+                    </div>
+                </div>
+
+                <div style="margin-bottom:16px">
+                    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+                        <span>Investimentos (${m.income > 0 ? ((m.investment / m.income) * 100).toFixed(1) : 0}%)</span>
+                        <span style="font-weight:600">${fmtMoney(m.investment, state.settings.currencyES)}</span>
+                    </div>
+                    <div style="width:100%;background:#e2e8f0;height:10px;border-radius:5px;overflow:hidden">
+                        <div style="width:${Math.min(100, m.income > 0 ? (m.investment / m.income) * 100 : 0)}%;background:#8b5cf6;height:100%"></div>
+                    </div>
+                </div>
+
+                <div>
+                    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
+                        <span>Poupança Livre (${m.savingsRate.toFixed(1)}%)</span>
+                        <span style="font-weight:600">${fmtMoney(Math.max(0, m.balance), state.settings.currencyES)}</span>
+                    </div>
+                    <div style="width:100%;background:#e2e8f0;height:10px;border-radius:5px;overflow:hidden">
+                        <div style="width:${Math.min(100, m.savingsRate)}%;background:#10b981;height:100%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div class="card" style="padding:20px">
             <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📅 Lançamentos do Mês (${m.txs.length})</h3>
-            ${m.txs.length === 0 ? `<div class="empty-state"><p>Nenhum lançamento encontrado para este mês.</p></div>` : `
+            ${m.txs.length === 0 ? `<div class="empty-state"><p>Nenhum lançamento encontrado para o mês selecionado (${state.selectedMonth}).</p></div>` : `
             <div class="table-container">
                 <table class="data-table">
-                    <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
+                    <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
                     <tbody>${m.txs.map(t => renderTransactionRow(t)).join('')}</tbody>
                 </table>
             </div>`}
@@ -440,13 +520,25 @@ const App = (() => {
     const renderTransactionRow = (t) => {
         const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
         const isBR = t.country === 'BR';
+        
+        let typeColor = 'var(--danger)';
+        let typeLabel = 'Saída';
+        if (t.type === 'income') {
+            typeColor = 'var(--emerald)';
+            typeLabel = 'Entrada';
+        } else if (t.type === 'investment') {
+            typeColor = '#7c3aed';
+            typeLabel = 'Investimento';
+        }
+
         return `<tr>
             <td style="white-space:nowrap">${fmtDate(t.date)}</td>
+            <td><span class="badge" style="background:${typeColor}22;color:${typeColor};font-weight:700">${typeLabel}</span></td>
             <td><span class="category-tag">${cat.icon} ${cat.name}</span></td>
             <td>${t.description || '-'}</td>
             <td><span class="badge badge-info">👤 ${t.assignedTo || 'Casal'}</span></td>
             <td><span class="badge ${isBR ? 'badge-info' : 'badge-warning'}">${isBR ? '🇧🇷 Brasil' : '🇪🇸 Espanha'}</span></td>
-            <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, isBR ? state.settings.currencyBR : state.settings.currencyES)}</td>
+            <td style="font-weight:600;color:${typeColor}">${fmtMoney(t.amount, isBR ? state.settings.currencyBR : state.settings.currencyES)}</td>
             <td style="text-align:right;white-space:nowrap">
                 <button onclick="App.showEditTransactionModal('${t.id}')" style="background:#e0f2fe;color:#0369a1;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600;margin-right:6px">✏️</button>
                 <button onclick="App.deleteTransaction('${t.id}')" style="background:#fee2e2;color:#b91c1c;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600">🗑️</button>
@@ -458,9 +550,8 @@ const App = (() => {
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
             <div>
                 <h2 style="margin:0;font-size:22px;color:var(--navy)">Lançamentos</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Histórico completo</p>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Histórico completo de registros</p>
             </div>
-            <button class="btn-primary" onclick="App.showAddTransactionModal()">+ Novo Lançamento</button>
         </div>
         <div class="card" style="padding:20px">
             <div id="transactionsTable">${renderTransactionsTable()}</div>
@@ -469,17 +560,17 @@ const App = (() => {
 
     const renderTransactionsTable = () => {
         const txs = state.transactions.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-        if (txs.length === 0) return `<div class="empty-state"><p>Nenhum lançamento cadastrado.</p></div>`;
+        if (txs.length === 0) return `<div class="empty-state"><p>Nenhum lançamento cadastrado no banco de dados.</p></div>`;
         return `<div class="table-container">
             <table class="data-table">
-                <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
+                <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
                 <tbody>${txs.map(t => renderTransactionRow(t)).join('')}</tbody>
             </table>
         </div>`;
     };
 
     const renderReports = () => {
-        const ym = state.selectedMonth; // 'YYYY-MM'
+        const ym = state.selectedMonth;
         const parts = ym.split('-');
         const year = parseInt(parts[0], 10);
         const month = parseInt(parts[1], 10);
@@ -527,7 +618,8 @@ const App = (() => {
         const txs = filterTransactionsByRange(start, end);
         const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
         const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
-        const balance = income - expense;
+        const investment = txs.filter(t => t.type === 'investment').reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const balance = income - expense - investment;
 
         return `<div class="card" style="padding:24px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #eee;padding-bottom:12px">
@@ -543,6 +635,7 @@ const App = (() => {
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
                 <div style="background:#f8fafc;padding:12px;border-radius:8px"><span style="font-size:12px;color:var(--text-light)">Total Receitas</span><div style="font-size:18px;font-weight:700" class="emerald-text">${fmtMoney(income, state.settings.currencyES)}</div></div>
                 <div style="background:#f8fafc;padding:12px;border-radius:8px"><span style="font-size:12px;color:var(--text-light)">Total Despesas</span><div style="font-size:18px;font-weight:700" class="danger-text">${fmtMoney(expense, state.settings.currencyES)}</div></div>
+                <div style="background:#f8fafc;padding:12px;border-radius:8px"><span style="font-size:12px;color:var(--text-light)">Total Investido</span><div style="font-size:18px;font-weight:700;color:#7c3aed">${fmtMoney(investment, state.settings.currencyES)}</div></div>
                 <div style="background:#f8fafc;padding:12px;border-radius:8px"><span style="font-size:12px;color:var(--text-light)">Resultado Líquido</span><div style="font-size:18px;font-weight:700" class="${balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(balance, state.settings.currencyES)}</div></div>
             </div>
             ${txs.length === 0 ? '<p style="color:var(--text-light)">Nenhum registro encontrado no período selecionado.</p>' : `
@@ -554,12 +647,12 @@ const App = (() => {
                         const isBR = t.country === 'BR';
                         return `<tr>
                             <td>${fmtDate(t.date)}</td>
-                            <td><span class="badge ${t.type === 'income' ? 'badge-success' : 'badge-danger'}">${t.type === 'income' ? 'Entrada' : 'Saída'}</span></td>
+                            <td><span class="badge ${t.type === 'income' ? 'badge-success' : t.type === 'investment' ? 'badge-info' : 'badge-danger'}">${t.type === 'income' ? 'Entrada' : t.type === 'investment' ? 'Investimento' : 'Saída'}</span></td>
                             <td>${cat.icon} ${cat.name}</td>
                             <td>${t.description || '-'}</td>
                             <td>${t.assignedTo || 'Casal'}</td>
                             <td>${isBR ? 'Brasil' : 'Espanha'}</td>
-                            <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, isBR ? state.settings.currencyBR : state.settings.currencyES)}</td>
+                            <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : t.type === 'investment' ? '#7c3aed' : 'var(--danger)'}">${fmtMoney(t.amount, isBR ? state.settings.currencyBR : state.settings.currencyES)}</td>
                         </tr>`;
                     }).join('')}</tbody>
                 </table>
@@ -577,7 +670,7 @@ const App = (() => {
             return;
         }
 
-        let csv = '\uFEFF'; // BOM UTF-8
+        let csv = '\uFEFF';
         csv += 'Data;Tipo;Categoria;Descrição;Responsável;País;Valor\n';
 
         txs.forEach(t => {
@@ -585,7 +678,8 @@ const App = (() => {
             const isBR = t.country === 'BR';
             const val = Number(t.amount || 0).toFixed(2).replace('.', ',');
             const desc = (t.description || '').replace(/;/g, ',');
-            csv += `${fmtDate(t.date)};${t.type === 'income' ? 'Entrada' : 'Saída'};${cat.name};"${desc}";${t.assignedTo || 'Casal'};${isBR ? 'Brasil' : 'Espanha'};${val}\n`;
+            const typeText = t.type === 'income' ? 'Entrada' : t.type === 'investment' ? 'Investimento' : 'Saída';
+            csv += `${fmtDate(t.date)};${typeText};${cat.name};"${desc}";${t.assignedTo || 'Casal'};${isBR ? 'Brasil' : 'Espanha'};${val}\n`;
         });
 
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -657,19 +751,25 @@ const App = (() => {
     const showTransactionModal = (tx = null) => {
         const isEdit = !!tx;
         const today = new Date().toISOString().slice(0, 10);
+        const overlay = el('modalOverlay');
+        if (!overlay) return;
 
         const categoriesOptions = state.categories.map(c => 
             `<option value="${c.id}" ${tx && tx.categoryId === c.id ? 'selected' : ''}>${c.icon} ${c.name} (${c.country})</option>`
         ).join('');
 
         el('modalContent').innerHTML = `
-            <h3 style="margin:0 0 16px;color:var(--navy)">${isEdit ? '✏️ Editar Lançamento' : '➕ Novo Lançamento'}</h3>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h3 style="margin:0;color:var(--navy)">${isEdit ? '✏️ Editar Lançamento' : '➕ Novo Lançamento'}</h3>
+                <button onclick="App.closeModal()" style="background:none;border:none;font-size:22px;cursor:pointer;color:var(--text-light)">&times;</button>
+            </div>
             <form onsubmit="event.preventDefault(); App.saveTransaction('${tx ? tx.id : ''}');">
                 <div class="form-group">
                     <label class="form-label">Tipo</label>
                     <select id="txType" class="input-field">
                         <option value="expense" ${tx && tx.type === 'expense' ? 'selected' : ''}>Despesa (Saída)</option>
                         <option value="income" ${tx && tx.type === 'income' ? 'selected' : ''}>Receita (Entrada)</option>
+                        <option value="investment" ${tx && tx.type === 'investment' ? 'selected' : ''}>Investimento / Aporte 📈</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -682,7 +782,7 @@ const App = (() => {
                 </div>
                 <div class="form-group">
                     <label class="form-label">Descrição</label>
-                    <input type="text" id="txDesc" class="input-field" placeholder="Ex: Mercado Mercadona" value="${tx ? tx.description : ''}">
+                    <input type="text" id="txDesc" class="input-field" placeholder="Ex: Mercado / Aporte Ações" value="${tx ? tx.description : ''}">
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                     <div class="form-group">
@@ -707,11 +807,16 @@ const App = (() => {
                 </div>
             </form>
         `;
-        el('modalOverlay').classList.add('show');
+        overlay.style.display = 'flex';
+        overlay.classList.add('show');
     };
 
     const closeModal = () => {
-        el('modalOverlay').classList.remove('show');
+        const overlay = el('modalOverlay');
+        if (overlay) {
+            overlay.style.display = 'none';
+            overlay.classList.remove('show');
+        }
     };
 
     const saveTransaction = (id) => {
