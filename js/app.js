@@ -1,5 +1,10 @@
+// ============================================================
+// FinFam - Controle Financeiro Familiar
+// Arquivo: js/app.js
+// ============================================================
+
 const App = (() => {
-    const STORAGE_KEY = 'finfam_data_v1';
+    const STORAGE_KEY = 'finfam_data_v2';
     const SESSION_KEY = 'finfam_session';
     const DEFAULT_TOKEN = 'FinFam_SecureToken_2026_@Key';
     const INACTIVITY_TIMEOUT = 15 * 60 * 1000;
@@ -8,7 +13,13 @@ const App = (() => {
         users: [],
         transactions: [],
         categories: [],
-        settings: { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '', apiToken: DEFAULT_TOKEN },
+        settings: { 
+            currencyBR: 'R$', 
+            currencyES: '€', 
+            monthStartDay: 1, 
+            googleScriptUrl: '', 
+            apiToken: DEFAULT_TOKEN
+        },
         currentUser: null,
         sessionExpiry: null,
         privacyMode: false,
@@ -18,11 +29,18 @@ const App = (() => {
     let inactivityTimer = null;
     const el = id => document.getElementById(id);
 
+    // ==================== UTILITÁRIOS ====================
     const fmtDate = d => {
         if (!d) return '-';
+        try {
+            const dt = new Date(d);
+            if (!isNaN(dt.getTime())) {
+                return dt.toLocaleDateString('pt-BR');
+            }
+        } catch (e) {}
         const parts = String(d).split('-');
         if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
-        return new Date(d).toLocaleDateString('pt-BR');
+        return String(d);
     };
 
     const fmtMoney = (v, currency) => {
@@ -41,7 +59,10 @@ const App = (() => {
             }
         } catch (e) {}
         let hash = 2166136261;
-        for (let i = 0; i < value.length; i++) { hash ^= value.charCodeAt(i); hash = Math.imul(hash, 16777619); }
+        for (let i = 0; i < value.length; i++) { 
+            hash ^= value.charCodeAt(i); 
+            hash = Math.imul(hash, 16777619); 
+        }
         return (hash >>> 0).toString(16);
     };
 
@@ -50,7 +71,7 @@ const App = (() => {
         if (!t) return;
         t.textContent = String(msg);
         t.className = `toast ${type} show`;
-        setTimeout(() => { t.classList.remove('show'); }, 3000);
+        setTimeout(() => { t.classList.remove('show'); }, 3500);
     };
 
     const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
@@ -60,13 +81,13 @@ const App = (() => {
         if (inactivityTimer) clearTimeout(inactivityTimer);
         if (isLoggedIn()) {
             inactivityTimer = setTimeout(() => {
-                showToast('Sessão encerrada por inatividade.', 'error');
+                showToast('🕐 Sessão encerrada por inatividade.', 'error');
                 logout();
             }, INACTIVITY_TIMEOUT);
         }
     };
 
-    // RESTAURADO: Lista completa de categorias incluindo Investimentos
+    // ==================== CATEGORIAS ====================
     const defaultCategories = [
         { id: 'cat_salario_es', name: 'Salário / Emprego', type: 'income', country: 'ES', icon: '💼' },
         { id: 'cat_freelance_es', name: 'Trabalho Freelance / Extras', type: 'income', country: 'ES', icon: '💻' },
@@ -89,57 +110,80 @@ const App = (() => {
         { id: 'cat_outros_br', name: 'Compromissos Diversos', type: 'expense', country: 'BR', icon: '🇧🇷' }
     ];
 
-    // --- COMUNICAÇÃO GOOGLE DRIVE ---
+    // ==================== GOOGLE DRIVE ====================
     const syncToDrive = async () => {
         const url = state.settings.googleScriptUrl;
-        if (!url) return;
+        if (!url) {
+            showToast('⚠️ URL do Google Drive não configurada.', 'error');
+            return;
+        }
         try {
+            showToast('🔄 Enviando dados para o Drive...', 'info');
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ action: 'sync', token: state.settings.apiToken || DEFAULT_TOKEN, transactions: state.transactions })
+                body: JSON.stringify({ 
+                    action: 'sync', 
+                    token: state.settings.apiToken || DEFAULT_TOKEN, 
+                    transactions: state.transactions 
+                })
             });
             const data = await res.json();
             if (data.status === 'success') {
-                showToast('Dados salvos no Google Drive com sucesso!');
+                showToast(`✅ ${state.transactions.length} registros salvos no Google Drive!`);
             } else {
-                showToast(data.message || 'Erro ao salvar no Drive.', 'error');
+                showToast(data.message || '❌ Erro ao salvar no Drive.', 'error');
             }
         } catch (e) {
-            showToast('Erro ao comunicar com o Google Drive.', 'error');
+            showToast('❌ Erro ao comunicar com o Google Drive.', 'error');
+            console.error('Sync error:', e);
         }
     };
 
     const syncFromDrive = async (silent = false) => {
         const url = state.settings.googleScriptUrl;
         if (!url) {
-            if (!silent) showToast('URL do Google Drive não configurada nas Configurações.', 'error');
+            if (!silent) showToast('⚠️ URL do Google Drive não configurada.', 'error');
             return;
         }
         try {
+            if (!silent) showToast('🔄 Sincronizando com o Drive...', 'info');
+            
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ action: 'fetch', token: state.settings.apiToken || DEFAULT_TOKEN })
+                body: JSON.stringify({ 
+                    action: 'fetch', 
+                    token: state.settings.apiToken || DEFAULT_TOKEN 
+                })
             });
             const data = await res.json();
+            
             if (data.status === 'success' && Array.isArray(data.transactions)) {
-                state.transactions = data.transactions;
-                saveState();
+                // NORMALIZA AS DATAS AO IMPORTAR
+                state.transactions = data.transactions.map(t => {
+                    try {
+                        const d = new Date(t.date);
+                        if (!isNaN(d.getTime())) {
+                            t.date = d.toISOString().slice(0, 10);
+                        }
+                    } catch (e) {}
+                    t.amount = Number(t.amount) || 0;
+                    return t;
+                });
                 
-                // Atualiza a tela ativa imediatamente após baixar do banco
-                const activePage = document.querySelector('.page.active')?.id;
-                if (activePage === 'dashboard' || !activePage) {
-                    const dash = el('dashboard');
-                    if (dash) dash.innerHTML = renderDashboard();
-                } else if (activePage === 'transactions') {
-                    const txTable = el('transactionsTable');
-                    if (txTable) txTable.innerHTML = renderTransactionsTable();
+                saveState();
+                refreshAllViews();
+                
+                if (!silent) {
+                    showToast(`✅ ${data.transactions.length} registros sincronizados!`);
                 }
-                if (!silent) showToast('Dados sincronizados do Banco de Dados!');
+            } else {
+                if (!silent) showToast(data.message || '❌ Erro ao consultar o Banco de Dados.', 'error');
             }
         } catch (e) {
-            if (!silent) showToast('Erro ao consultar o Banco de Dados.', 'error');
+            if (!silent) showToast('❌ Erro ao consultar o Banco de Dados.', 'error');
+            console.error('Sync error:', e);
         }
     };
 
@@ -150,39 +194,55 @@ const App = (() => {
         if (!dot || !text) return;
         if (!url) {
             dot.style.backgroundColor = '#ef4444';
-            text.textContent = 'URL não configurada';
+            text.textContent = '❌ URL não configurada';
             return;
         }
-        text.textContent = 'Verificando...';
+        text.textContent = '🔄 Verificando...';
         dot.style.backgroundColor = '#f59e0b';
         try {
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ action: 'ping', token: state.settings.apiToken || DEFAULT_TOKEN })
+                body: JSON.stringify({ 
+                    action: 'ping', 
+                    token: state.settings.apiToken || DEFAULT_TOKEN 
+                })
             });
             const data = await res.json();
             if (data.status === 'success') {
                 dot.style.backgroundColor = '#10b981';
-                text.textContent = 'Conectado com Sucesso';
+                text.textContent = '✅ Conectado com Sucesso';
+                showToast('✅ Conexão com Google Drive estabelecida!', 'success');
             } else {
                 dot.style.backgroundColor = '#ef4444';
-                text.textContent = 'Erro de Autenticação / Token';
+                text.textContent = '❌ Erro de Autenticação';
+                showToast('❌ Falha na autenticação.', 'error');
             }
         } catch (e) {
             dot.style.backgroundColor = '#ef4444';
-            text.textContent = 'Falha na Conexão';
+            text.textContent = '❌ Falha na Conexão';
+            showToast('❌ Não foi possível conectar.', 'error');
         }
     };
 
+    // ==================== GESTÃO DE ESTADO ====================
     const initState = () => {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
             try {
-                state = JSON.parse(raw);
+                const parsed = JSON.parse(raw);
+                state = parsed;
                 state.categories = [...defaultCategories];
                 if (!state.selectedMonth) state.selectedMonth = new Date().toISOString().slice(0, 7);
-                if (!state.settings) state.settings = { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '', apiToken: DEFAULT_TOKEN };
+                if (!state.settings) {
+                    state.settings = { 
+                        currencyBR: 'R$', 
+                        currencyES: '€', 
+                        monthStartDay: 1, 
+                        googleScriptUrl: '', 
+                        apiToken: DEFAULT_TOKEN
+                    };
+                }
             } catch (e) {
                 resetState();
             }
@@ -196,7 +256,13 @@ const App = (() => {
             users: [],
             transactions: [],
             categories: [...defaultCategories],
-            settings: { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '', apiToken: DEFAULT_TOKEN },
+            settings: { 
+                currencyBR: 'R$', 
+                currencyES: '€', 
+                monthStartDay: 1, 
+                googleScriptUrl: '', 
+                apiToken: DEFAULT_TOKEN
+            },
             currentUser: null,
             sessionExpiry: null,
             privacyMode: false,
@@ -209,6 +275,29 @@ const App = (() => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     };
 
+    const refreshAllViews = () => {
+        const activePage = document.querySelector('.page.active')?.id || 'dashboard';
+        
+        if (activePage === 'dashboard' || !activePage) {
+            const dash = el('dashboard');
+            if (dash) dash.innerHTML = renderDashboard();
+        }
+        if (activePage === 'transactions') {
+            const txTable = el('transactionsTable');
+            if (txTable) txTable.innerHTML = renderTransactionsTable();
+        }
+        if (activePage === 'reports') {
+            const reportContainer = el('reportContainer');
+            if (reportContainer) {
+                reportContainer.innerHTML = renderMonthlyReport();
+            }
+        }
+        
+        const monthPicker = el('dashMonthPicker');
+        if (monthPicker) monthPicker.value = state.selectedMonth;
+    };
+
+    // ==================== AUTENTICAÇÃO ====================
     const getSession = () => {
         const raw = sessionStorage.getItem(SESSION_KEY);
         if (!raw) return null;
@@ -249,28 +338,17 @@ const App = (() => {
 
     const togglePrivacy = () => {
         state.privacyMode = !state.privacyMode;
-        renderApp();
+        refreshAllViews();
     };
 
-    const filterTransactionsByRange = (startDate, endDate) => {
-        return state.transactions.filter(t => {
-            if (!t || !t.date) return false;
-            const d = String(t.date).trim().substring(0, 10);
-            if (startDate && d < startDate) return false;
-            if (endDate && d > endDate) return false;
-            return true;
-        }).sort((a, b) => new Date(b.date) - new Date(a.date));
-    };
-
-    // FILTRO DE MÊS ROBUSTO: Lê perfeitamente do banco de dados (Google Drive)
+    // ==================== FILTROS ====================
     const getSelectedMonthData = () => {
-        const ym = state.selectedMonth; // Formato 'YYYY-MM'
+        const ym = state.selectedMonth;
+        
         const txs = state.transactions.filter(t => {
             if (!t || !t.date) return false;
-            const rawDate = String(t.date).trim();
-            if (rawDate.startsWith(ym)) return true;
             try {
-                const d = new Date(rawDate);
+                const d = new Date(t.date);
                 if (!isNaN(d.getTime())) {
                     return d.toISOString().slice(0, 7) === ym;
                 }
@@ -282,49 +360,91 @@ const App = (() => {
         const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
         const investment = txs.filter(t => t.type === 'investment').reduce((s, t) => s + (Number(t.amount) || 0), 0);
         
-        // Saldo desconta despesas e investimentos aportados
         const balance = income - expense - investment;
         const savingsRate = income > 0 ? (((income - expense) / income) * 100) : 0;
 
-        return { income, expense, investment, balance, savingsRate, txs };
+        // PATRIMÔNIO TOTAL ACUMULADO
+        const totalInvestments = state.transactions
+            .filter(t => t.type === 'investment')
+            .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        
+        const totalBalance = state.transactions
+            .filter(t => t.type === 'income')
+            .reduce((s, t) => s + (Number(t.amount) || 0), 0) -
+            state.transactions.filter(t => t.type === 'expense')
+            .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
+        const netWorth = totalBalance + totalInvestments;
+
+        return {
+            income, expense, investment, balance, savingsRate,
+            netWorth,
+            txs
+        };
     };
 
     const changeSelectedMonth = (ym) => {
         if (!ym) return;
         state.selectedMonth = ym;
         saveState();
-        const dash = el('dashboard');
-        if (dash) dash.innerHTML = renderDashboard();
+        refreshAllViews();
     };
 
-    // --- AUTENTICAÇÃO E TELAS INICIAIS ---
+    // ==================== TELAS DE AUTENTICAÇÃO ====================
     const doSetup = async () => {
         const name = el('setupName')?.value.trim();
         const email = el('setupEmail')?.value.trim().toLowerCase();
         const pwd = el('setupPwd')?.value;
         const pwd2 = el('setupPwd2')?.value;
-        if (!name || !email || !pwd) { showToast('Preencha todos os campos.', 'error'); return; }
-        if (pwd !== pwd2) { showToast('As senhas não coincidem.', 'error'); return; }
+        if (!name || !email || !pwd) { 
+            showToast('⚠️ Preencha todos os campos.', 'error'); 
+            return; 
+        }
+        if (pwd !== pwd2) { 
+            showToast('⚠️ As senhas não coincidem.', 'error'); 
+            return; 
+        }
+        if (pwd.length < 6) {
+            showToast('⚠️ A senha deve ter no mínimo 6 caracteres.', 'error');
+            return;
+        }
         const passwordHash = await hashPwd(pwd);
-        const user = { id: generateId(), name, email, passwordHash, role: 'admin', createdAt: now() };
+        const user = { 
+            id: generateId(), 
+            name, 
+            email, 
+            passwordHash, 
+            role: 'admin', 
+            createdAt: now()
+        };
         state.users = [user];
         saveState();
         setSession(user.id);
         renderApp();
-        showToast('Conta criada com sucesso!');
+        showToast('✅ Conta criada com sucesso!');
     };
 
     const doLogin = async () => {
         const email = el('loginEmail')?.value.trim().toLowerCase();
         const pwd = el('loginPwd')?.value;
+        if (!email || !pwd) {
+            showToast('⚠️ Preencha email e senha.', 'error');
+            return;
+        }
         const user = state.users.find(u => String(u.email).toLowerCase() === email);
-        if (!user) { showToast('Usuário não encontrado.', 'error'); return; }
+        if (!user) { 
+            showToast('❌ Usuário não encontrado.', 'error'); 
+            return; 
+        }
         const hash = await hashPwd(pwd);
-        if (user.passwordHash !== hash) { showToast('Senha incorreta.', 'error'); return; }
+        if (user.passwordHash !== hash) { 
+            showToast('❌ Senha incorreta.', 'error'); 
+            return; 
+        }
         setSession(user.id);
         renderApp();
         syncFromDrive(true);
-        showToast('Sessão iniciada!');
+        showToast('✅ Sessão iniciada!');
     };
 
     const logout = () => {
@@ -339,10 +459,17 @@ const App = (() => {
         const targetPage = element.getAttribute('data-page');
         const p = el(targetPage);
         if (p) p.classList.add('active');
-        if (targetPage === 'dashboard') syncFromDrive(true);
-        else if (targetPage === 'settings') checkConnection();
+        if (targetPage === 'dashboard') {
+            syncFromDrive(true);
+        } else if (targetPage === 'settings') {
+            checkConnection();
+        } else if (targetPage === 'reports') {
+            const reportContainer = el('reportContainer');
+            if (reportContainer) reportContainer.innerHTML = renderMonthlyReport();
+        }
     };
 
+    // ==================== RENDERIZAÇÃO ====================
     const renderLogin = () => {
         el('app').innerHTML = `
             <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
@@ -399,50 +526,10 @@ const App = (() => {
             </div>`;
     };
 
-    const renderApp = () => {
-        el('app').innerHTML = `
-            <div class="sidebar">
-                <div class="logo">
-                    <div style="display:flex;align-items:center;gap:12px">
-                        <div style="width:40px;height:40px;background:rgba(255,255,255,.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px">💶</div>
-                        <div><div style="font-weight:700;font-size:16px">FinFam</div><div style="font-size:11px;opacity:.7">ES 🇪🇸 & BR 🇧🇷</div></div>
-                    </div>
-                </div>
-                <div style="flex:1;padding:12px 0">
-                    <div class="nav-item active" data-page="dashboard" onclick="App.nav(this)"><span>📊</span> Dashboard</div>
-                    <div class="nav-item" data-page="transactions" onclick="App.nav(this)"><span>📝</span> Lançamentos</div>
-                    <div class="nav-item" data-page="reports" onclick="App.nav(this)"><span>📈</span> Relatórios</div>
-                    <div class="nav-item" data-page="settings" onclick="App.nav(this)"><span>⚙️</span> Configurações</div>
-                </div>
-                <div style="padding:16px;border-top:1px solid rgba(255,255,255,.1)">
-                    <div style="display:flex;align-items:center;gap:10px">
-                        <div class="user-avatar">${state.currentUser?.name?.charAt(0).toUpperCase() || 'U'}</div>
-                        <div style="flex:1;min-width:0">
-                            <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${state.currentUser?.name || ''}</div>
-                            <button onclick="App.togglePrivacy()" style="background:none;border:none;color:rgba(255,255,255,.8);cursor:pointer;font-size:12px;padding:0">${state.privacyMode ? '👁️ Mostrar' : '🙈 Ocultar'}</button>
-                        </div>
-                        <button onclick="App.logout()" style="background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;font-size:18px" title="Sair">🚪</button>
-                    </div>
-                </div>
-            </div>
-            <div class="main-content">
-                <div id="dashboard" class="page active">${renderDashboard()}</div>
-                <div id="transactions" class="page">${renderTransactions()}</div>
-                <div id="reports" class="page">${renderReports()}</div>
-                <div id="settings" class="page">${renderSettings()}</div>
-            </div>
-            
-            <!-- MODAL COM ESTILOS SEGUROS (Z-INDEX 9999) -->
-            <div id="modalOverlay" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
-                <div id="modalContent" class="modal" style="background:#fff; padding:24px; border-radius:12px; width:90%; max-width:550px; max-height:90vh; overflow-y:auto; box-shadow:0 10px 25px rgba(0,0,0,0.2);"></div>
-            </div>
-            <div id="toast" class="toast"></div>`;
-    };
-
+    // ==================== RENDER DASHBOARD ====================
     const renderDashboard = () => {
         const m = getSelectedMonthData();
 
-        // Dados para Gráficos Avançados de Inteligência Financeira
         const expByCategory = {};
         m.txs.filter(t => t.type === 'expense').forEach(t => {
             const catName = state.categories.find(c => c.id === t.categoryId)?.name || 'Outros';
@@ -462,14 +549,23 @@ const App = (() => {
             </div>
         </div>
 
+        <!-- CARDS -->
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
             <div class="card stat-card"><div class="stat-label">Saldo Livre</div><div class="stat-value ${m.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.balance, state.settings.currencyES)}</div></div>
             <div class="card stat-card"><div class="stat-label">Receitas</div><div class="stat-value emerald-text">${fmtMoney(m.income, state.settings.currencyES)}</div></div>
             <div class="card stat-card"><div class="stat-label">Despesas</div><div class="stat-value danger-text">${fmtMoney(m.expense, state.settings.currencyES)}</div></div>
             <div class="card stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-label">Investimentos / Aportes</div><div class="stat-value" style="color:#8b5cf6">${fmtMoney(m.investment, state.settings.currencyES)}</div></div>
+            <!-- PATRIMÔNIO TOTAL -->
+            <div class="card stat-card net-worth-card" style="grid-column: span 1;">
+                <div class="stat-label">🏦 Patrimônio Total</div>
+                <div class="net-worth-value">${fmtMoney(m.netWorth, state.settings.currencyES)}</div>
+                <div style="font-size:11px; color: var(--text-light); margin-top:4px;">
+                    Investimentos Acumulados: ${fmtMoney(state.transactions.filter(t => t.type === 'investment').reduce((s, t) => s + (Number(t.amount) || 0), 0), state.settings.currencyES)}
+                </div>
+            </div>
         </div>
 
-        <!-- GRÁFICOS AVANÇADOS DE INTELIGÊNCIA FINANCEIRA -->
+        <!-- GRÁFICOS -->
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-bottom:24px">
             <div class="card" style="padding:24px">
                 <h3 style="margin:0 0 20px;font-size:16px;color:var(--navy);display:flex;align-items:center;gap:8px">📊 Distribuição de Gastos por Categoria</h3>
@@ -503,7 +599,7 @@ const App = (() => {
 
                 <div style="margin-bottom:20px">
                     <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;font-weight:600;color:var(--navy)">
-                        <span>Taxa de Aportes/Investimentos (${m.income > 0 ? ((m.investment / m.income) * 100).toFixed(1) : 0}%)</span>
+                        <span>Taxa de Aportes (${m.income > 0 ? ((m.investment / m.income) * 100).toFixed(1) : 0}%)</span>
                     </div>
                     <div style="width:100%;background:#f1f5f9;height:12px;border-radius:6px;overflow:hidden">
                         <div style="width:${Math.min(100, m.income > 0 ? (m.investment / m.income) * 100 : 0)}%;background:#8b5cf6;height:100%"></div>
@@ -521,6 +617,7 @@ const App = (() => {
             </div>
         </div>
 
+        <!-- EXTRATO -->
         <div class="card" style="padding:20px">
             <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📅 Extrato do Mês Selecionado</h3>
             ${m.txs.length === 0 ? `<div class="empty-state"><p>Nenhum lançamento encontrado para este mês.</p></div>` : `
@@ -533,6 +630,7 @@ const App = (() => {
         </div>`;
     };
 
+    // ==================== RENDER TRANSAÇÕES ====================
     const renderTransactionRow = (t) => {
         const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
         const isBR = t.country === 'BR';
@@ -557,7 +655,6 @@ const App = (() => {
         </tr>`;
     };
 
-    // BOTÃO REMOVIDO DA PÁGINA DE LANÇAMENTOS CONFORME PEDIDO
     const renderTransactions = () => {
         return `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
@@ -583,89 +680,180 @@ const App = (() => {
         </div>`;
     };
 
-    // --- RELATÓRIOS ---
-    const renderReports = () => {
+    // ==================== RELATÓRIOS MENSAIS ====================
+    const renderMonthlyReport = () => {
         const ym = state.selectedMonth;
-        const firstDay = `${ym}-01`;
-        const lastDayNum = new Date(ym.split('-')[0], ym.split('-')[1], 0).getDate();
-        const lastDay = `${ym}-${String(lastDayNum).padStart(2, '0')}`;
+        const [year, month] = ym.split('-');
+        const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleString('pt-BR', { month: 'long' });
         
+        // Dados do mês
+        const monthTxs = state.transactions.filter(t => {
+            if (!t || !t.date) return false;
+            try {
+                const d = new Date(t.date);
+                return !isNaN(d.getTime()) && d.toISOString().slice(0, 7) === ym;
+            } catch (e) { return false; }
+        });
+        
+        const monthIncome = monthTxs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+        const monthExpense = monthTxs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+        const monthInvestment = monthTxs.filter(t => t.type === 'investment').reduce((s, t) => s + Number(t.amount), 0);
+        const monthBalance = monthIncome - monthExpense - monthInvestment;
+        
+        // Dados acumulados do ano
+        const yearTxs = state.transactions.filter(t => {
+            if (!t || !t.date) return false;
+            try {
+                const d = new Date(t.date);
+                return !isNaN(d.getTime()) && d.getFullYear() === parseInt(year);
+            } catch (e) { return false; }
+        });
+        
+        const yearIncome = yearTxs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+        const yearExpense = yearTxs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+        const yearInvestment = yearTxs.filter(t => t.type === 'investment').reduce((s, t) => s + Number(t.amount), 0);
+        const yearBalance = yearIncome - yearExpense - yearInvestment;
+
+        // Patrimônio total
+        const totalInvestments = state.transactions
+            .filter(t => t.type === 'investment')
+            .reduce((s, t) => s + Number(t.amount), 0);
+        const totalBalance = state.transactions
+            .filter(t => t.type === 'income')
+            .reduce((s, t) => s + Number(t.amount), 0) -
+            state.transactions.filter(t => t.type === 'expense')
+            .reduce((s, t) => s + Number(t.amount), 0);
+        const netWorth = totalBalance + totalInvestments;
+
         return `
-        <div class="no-print" style="margin-bottom:24px">
-            <h2 style="margin:0;font-size:22px;color:var(--navy)">Relatórios Analíticos</h2>
-            <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Filtre por período personalizado</p>
-        </div>
         <div class="card no-print" style="padding:20px;margin-bottom:24px">
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;align-items:end">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
                 <div>
-                    <label class="form-label">Data Inicial</label>
-                    <input type="date" id="reportStartDate" class="input-field" value="${firstDay}">
+                    <h3 style="margin:0;color:var(--navy)">📊 Relatório Mensal - ${monthName} ${year}</h3>
+                    <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">${monthTxs.length} lançamentos no período</p>
                 </div>
-                <div>
-                    <label class="form-label">Data Final</label>
-                    <input type="date" id="reportEndDate" class="input-field" value="${lastDay}">
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button class="btn-primary" style="background:#dc2626" onclick="App.exportToPDF()">📄 PDF</button>
+                    <button class="btn-primary" style="background:#10b981" onclick="App.exportToCSV()">📊 CSV</button>
                 </div>
-                <button class="btn-primary" onclick="App.updateReportView()">Filtrar Período</button>
-                <button class="btn-primary" style="background:#10b981" onclick="App.exportToExcel()">Exportar .CSV</button>
             </div>
         </div>
-        <div id="reportContainer">${generateReportHTML(firstDay, lastDay)}</div>`;
-    };
 
-    const updateReportView = () => {
-        const s = el('reportStartDate')?.value;
-        const e = el('reportEndDate')?.value;
-        const container = el('reportContainer');
-        if (container) container.innerHTML = generateReportHTML(s, e);
-    };
-
-    const generateReportHTML = (start, end) => {
-        const txs = filterTransactionsByRange(start, end);
-        const inc = txs.filter(t => t.type === 'income').reduce((acc, t) => acc + Number(t.amount || 0), 0);
-        const exp = txs.filter(t => t.type === 'expense').reduce((acc, t) => acc + Number(t.amount || 0), 0);
-        const inv = txs.filter(t => t.type === 'investment').reduce((acc, t) => acc + Number(t.amount || 0), 0);
-        const bal = inc - exp - inv;
-
-        return `
-        <div class="card" style="padding:24px">
-            <h3 style="margin:0 0 16px;color:var(--navy)">Balanço do Período (${fmtDate(start)} até ${fmtDate(end)})</h3>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
-                <div style="background:#f8fafc;padding:12px;border-radius:8px">
-                    <div style="font-size:12px;color:var(--text-light)">Total Receitas</div>
-                    <div style="font-size:18px;font-weight:bold;color:var(--emerald)">${fmtMoney(inc, state.settings.currencyES)}</div>
-                </div>
-                <div style="background:#f8fafc;padding:12px;border-radius:8px">
-                    <div style="font-size:12px;color:var(--text-light)">Total Despesas</div>
-                    <div style="font-size:18px;font-weight:bold;color:var(--danger)">${fmtMoney(exp, state.settings.currencyES)}</div>
-                </div>
-                <div style="background:#f8fafc;padding:12px;border-radius:8px">
-                    <div style="font-size:12px;color:var(--text-light)">Total Investimentos</div>
-                    <div style="font-size:18px;font-weight:bold;color:#8b5cf6">${fmtMoney(inv, state.settings.currencyES)}</div>
-                </div>
-                <div style="background:#f8fafc;padding:12px;border-radius:8px">
-                    <div style="font-size:12px;color:var(--text-light)">Resultado Líquido</div>
-                    <div style="font-size:18px;font-weight:bold;color:${bal >= 0 ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(bal, state.settings.currencyES)}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-bottom:24px">
+            <div class="card" style="padding:20px">
+                <h4 style="margin:0 0 16px;color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px">📆 Mês: ${ym}</h4>
+                <div style="display:grid;gap:10px">
+                    <div><span class="badge badge-success">Receitas:</span> <strong>${fmtMoney(monthIncome, state.settings.currencyES)}</strong></div>
+                    <div><span class="badge badge-danger">Despesas:</span> <strong>${fmtMoney(monthExpense, state.settings.currencyES)}</strong></div>
+                    <div><span class="badge badge-purple">Investimentos:</span> <strong>${fmtMoney(monthInvestment, state.settings.currencyES)}</strong></div>
+                    <div style="border-top:2px solid var(--border);padding-top:10px;font-size:18px;font-weight:bold;color:${monthBalance >= 0 ? 'var(--emerald)' : 'var(--danger)'}">
+                        Saldo: ${fmtMoney(monthBalance, state.settings.currencyES)}
+                    </div>
                 </div>
             </div>
-            <h4 style="margin:20px 0 10px;color:var(--navy)">Lançamentos no Período (${txs.length})</h4>
-            ${txs.length === 0 ? '<p style="color:var(--text-light)">Nenhum registro encontrado.</p>' : `
+
+            <div class="card" style="padding:20px">
+                <h4 style="margin:0 0 16px;color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px">📈 Acumulado ${year}</h4>
+                <div style="display:grid;gap:10px">
+                    <div><span class="badge badge-success">Receitas:</span> <strong>${fmtMoney(yearIncome, state.settings.currencyES)}</strong></div>
+                    <div><span class="badge badge-danger">Despesas:</span> <strong>${fmtMoney(yearExpense, state.settings.currencyES)}</strong></div>
+                    <div><span class="badge badge-purple">Investimentos:</span> <strong>${fmtMoney(yearInvestment, state.settings.currencyES)}</strong></div>
+                    <div style="border-top:2px solid var(--border);padding-top:10px;font-size:18px;font-weight:bold;color:${yearBalance >= 0 ? 'var(--emerald)' : 'var(--danger)'}">
+                        Saldo: ${fmtMoney(yearBalance, state.settings.currencyES)}
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="padding:20px;background:linear-gradient(135deg,#fffbeb 0%,#fff 100%);border-left:4px solid #f59e0b">
+                <h4 style="margin:0 0 16px;color:#92400e;border-bottom:2px solid #fde68a;padding-bottom:8px">🏦 Patrimônio Total</h4>
+                <div style="display:grid;gap:10px">
+                    <div style="font-size:28px;font-weight:800;color:#d97706">
+                        ${fmtMoney(netWorth, state.settings.currencyES)}
+                    </div>
+                    <div style="font-size:13px;color:var(--text-light)">
+                        Investimentos acumulados: ${fmtMoney(totalInvestments, state.settings.currencyES)}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- LISTA DE LANÇAMENTOS DO MÊS -->
+        <div class="card" style="padding:20px">
+            <h4 style="margin:0 0 16px;color:var(--navy)">📋 Lançamentos do Mês</h4>
+            ${monthTxs.length === 0 ? '<div class="empty-state"><p>Nenhum lançamento neste mês.</p></div>' : `
             <div class="table-container">
                 <table class="data-table">
                     <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Valor</th></tr></thead>
-                    <tbody>${txs.map(t => {
+                    <tbody>${monthTxs.map(t => {
                         const cat = state.categories.find(c => c.id === t.categoryId) || {name:'Geral'};
-                        return `<tr><td>${fmtDate(t.date)}</td><td>${t.type}</td><td>${cat.name}</td><td>${t.description||'-'}</td><td>${fmtMoney(t.amount, state.settings.currencyES)}</td></tr>`;
+                        return `<tr>
+                            <td>${fmtDate(t.date)}</td>
+                            <td><span class="badge ${t.type === 'income' ? 'badge-success' : t.type === 'investment' ? 'badge-purple' : 'badge-danger'}">${t.type === 'income' ? 'Receita' : t.type === 'investment' ? 'Investimento' : 'Despesa'}</span></td>
+                            <td>${cat.icon} ${cat.name}</td>
+                            <td>${t.description || '-'}</td>
+                            <td style="font-weight:600">${fmtMoney(t.amount, state.settings.currencyES)}</td>
+                        </tr>`;
                     }).join('')}</tbody>
                 </table>
             </div>`}
         </div>`;
     };
 
-    const exportToExcel = () => {
-        const s = el('reportStartDate')?.value;
-        const e = el('reportEndDate')?.value;
-        const txs = filterTransactionsByRange(s, e);
-        if (!txs.length) { showToast('Nenhum dado para exportar.', 'error'); return; }
+    // ==================== EXPORTAÇÕES ====================
+    const exportToPDF = () => {
+        const content = document.getElementById('reportContainer');
+        if (!content) return;
+        
+        showToast('🔄 Gerando PDF...', 'info');
+        
+        const opt = {
+            margin: 1,
+            filename: `Relatorio_FinFam_${state.selectedMonth}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2, useCORS: true },
+            jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+        };
+        
+        const header = document.createElement('div');
+        const monthName = new Date(parseInt(state.selectedMonth.split('-')[0]), parseInt(state.selectedMonth.split('-')[1]) - 1)
+            .toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+        header.innerHTML = `
+            <div style="text-align:center;margin-bottom:20px;color:#1e3a5f;padding:20px;border-bottom:3px solid #1e3a5f;">
+                <h1 style="font-size:24px;margin:0;">📊 Relatório Financeiro</h1>
+                <h2 style="font-size:18px;margin:5px 0;color:#2c5282;">${monthName}</h2>
+                <p style="color:#64748b;margin:5px 0 0;">Controle Familiar FinFam</p>
+            </div>
+        `;
+        
+        const clone = content.cloneNode(true);
+        const wrapper = document.createElement('div');
+        wrapper.appendChild(header);
+        wrapper.appendChild(clone);
+        
+        // Remove botões do clone
+        wrapper.querySelectorAll('.no-print, button').forEach(el => el.remove());
+        
+        html2pdf().set(opt).from(wrapper).save().then(() => {
+            showToast('✅ PDF gerado com sucesso!');
+        }).catch(() => {
+            showToast('❌ Erro ao gerar PDF.', 'error');
+        });
+    };
+
+    const exportToCSV = () => {
+        const ym = state.selectedMonth;
+        const txs = state.transactions.filter(t => {
+            if (!t || !t.date) return false;
+            try {
+                const d = new Date(t.date);
+                return !isNaN(d.getTime()) && d.toISOString().slice(0, 7) === ym;
+            } catch (e) { return false; }
+        });
+        
+        if (!txs.length) { 
+            showToast('⚠️ Nenhum dado para exportar.', 'error'); 
+            return; 
+        }
         
         let csv = 'Data;Tipo;Categoria;Descricao;Responsavel;Pais;Valor\n';
         txs.forEach(t => {
@@ -676,36 +864,41 @@ const App = (() => {
         const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.download = `Relatorio_FinFam_${s}_a_${e}.csv`;
+        link.download = `Relatorio_FinFam_${ym}.csv`;
         link.click();
-        showToast('Relatório exportado com sucesso!');
+        showToast('✅ CSV exportado com sucesso!');
     };
 
-    // --- CONFIGURAÇÕES ---
+    // ==================== CONFIGURAÇÕES ====================
     const renderSettings = () => {
         return `
         <div class="card" style="padding:24px;max-width:700px;margin:0 auto">
-            <h3 style="margin:0 0 16px;color:var(--navy)">Configuração de Conexão com Google Drive</h3>
+            <h3 style="margin:0 0 16px;color:var(--navy)">⚙️ Configurações</h3>
+            
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;padding:12px;background:#f8fafc;border-radius:8px">
                 <span id="connStatusDot" style="width:12px;height:12px;border-radius:50%;background:#f59e0b"></span>
                 <span id="connStatusText" style="font-weight:600">Verificando conexão...</span>
-                <button onclick="App.checkConnection()" style="margin-left:auto;padding:6px 12px;background:#e2e8f0;border:none;border-radius:6px;cursor:pointer;font-weight:600">Testar Conexão</button>
+                <button onclick="App.checkConnection()" style="margin-left:auto;padding:6px 12px;background:#e2e8f0;border:none;border-radius:6px;cursor:pointer;font-weight:600">🔍 Testar</button>
             </div>
+            
             <form onsubmit="event.preventDefault(); App.saveSettings();">
                 <div style="margin-bottom:16px">
                     <label class="form-label">URL do Google Apps Script (Web App)</label>
                     <input type="url" id="cfgUrl" class="input-field" placeholder="https://script.google.com/macros/s/.../exec" value="${state.settings.googleScriptUrl || ''}" required>
                 </div>
-                <div style="display:flex;gap:12px">
-                    <button type="submit" class="btn-primary">Salvar Configurações</button>
-                    <button type="button" class="btn-primary" style="background:#0284c7" onclick="App.syncFromDrive()">Forçar Sincronização com o Banco</button>
+                <div style="display:flex;gap:12px;flex-wrap:wrap">
+                    <button type="submit" class="btn-primary">💾 Salvar Configurações</button>
+                    <button type="button" class="btn-primary" style="background:#0284c7" onclick="App.syncFromDrive()">📥 Sincronizar do Drive</button>
+                    <button type="button" class="btn-primary" style="background:#059669" onclick="App.syncToDrive()">📤 Enviar para o Drive</button>
                 </div>
             </form>
+            
             <hr style="margin:30px 0;border:none;border-top:1px solid #e2e8f0">
+            
             <div>
-                <h4 style="color:var(--danger);margin-top:0">Zona de Perigo</h4>
+                <h4 style="color:var(--danger);margin-top:0">⚠️ Zona de Perigo</h4>
                 <p style="color:var(--text-light);font-size:13px">Apaga todos os dados locais salvos neste navegador.</p>
-                <button onclick="App.resetAllData()" style="background:#fee2e2;color:#b91c1c;border:none;padding:10px 16px;border-radius:8px;cursor:pointer;font-weight:600">⚠️ Redefinir Sistema Inteiro</button>
+                <button onclick="App.resetAllData()" style="background:#fee2e2;color:#b91c1c;border:none;padding:10px 16px;border-radius:8px;cursor:pointer;font-weight:600">🗑️ Redefinir Sistema Inteiro</button>
             </div>
         </div>`;
     };
@@ -714,19 +907,19 @@ const App = (() => {
         const url = el('cfgUrl')?.value.trim() || '';
         state.settings.googleScriptUrl = url;
         saveState();
-        showToast('Configurações salvas!');
+        showToast('✅ Configurações salvas!');
         checkConnection();
     };
 
     const resetAllData = () => {
-        if (confirm('Tem certeza absoluta que deseja apagar tudo? Esta ação é irreversível.')) {
+        if (confirm('⚠️ Tem certeza absoluta que deseja apagar tudo? Esta ação é irreversível!')) {
             localStorage.clear();
             sessionStorage.clear();
             location.reload();
         }
     };
 
-    // --- MODAL DE LANÇAMENTO (CORRIGIDO E SEGURO) ---
+    // ==================== MODAL DE LANÇAMENTOS ====================
     const showTransactionModal = (txId = null) => {
         let tx = null;
         if (txId && typeof txId === 'string') {
@@ -750,11 +943,11 @@ const App = (() => {
             <form onsubmit="event.preventDefault(); App.saveTransaction('${tx ? tx.id : ''}');">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                     <div class="form-group">
-                        <label class="form-label">Tipo de Movimento</label>
+                        <label class="form-label">Tipo</label>
                         <select id="txType" class="input-field">
-                            <option value="expense" ${tx && tx.type === 'expense' ? 'selected' : ''}>Despesa (Saída)</option>
-                            <option value="income" ${tx && tx.type === 'income' ? 'selected' : ''}>Receita (Entrada)</option>
-                            <option value="investment" ${tx && tx.type === 'investment' ? 'selected' : ''}>Investimento / Aporte 📈</option>
+                            <option value="expense" ${tx && tx.type === 'expense' ? 'selected' : ''}>Despesa</option>
+                            <option value="income" ${tx && tx.type === 'income' ? 'selected' : ''}>Receita</option>
+                            <option value="investment" ${tx && tx.type === 'investment' ? 'selected' : ''}>Investimento 📈</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -776,7 +969,7 @@ const App = (() => {
                         <input type="text" id="txAssigned" class="input-field" value="${tx ? tx.assignedTo : 'Casal'}">
                     </div>
                     <div class="form-group">
-                        <label class="form-label">País de Origem</label>
+                        <label class="form-label">País</label>
                         <select id="txCountry" class="input-field">
                             <option value="ES" ${tx && tx.country === 'ES' ? 'selected' : ''}>🇪🇸 Espanha</option>
                             <option value="BR" ${tx && tx.country === 'BR' ? 'selected' : ''}>🇧🇷 Brasil</option>
@@ -789,7 +982,7 @@ const App = (() => {
                 </div>
                 <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:24px">
                     <button type="button" class="btn-primary" style="background:#94a3b8;padding:12px 20px;" onclick="App.closeModal()">Cancelar</button>
-                    <button type="submit" class="btn-primary" style="padding:12px 24px;">${isEdit ? 'Salvar Alteração' : 'Adicionar Registro'}</button>
+                    <button type="submit" class="btn-primary" style="padding:12px 24px;">${isEdit ? 'Salvar' : 'Adicionar'}</button>
                 </div>
             </form>
         `;
@@ -810,6 +1003,11 @@ const App = (() => {
         const country = el('txCountry').value;
         const amount = parseFloat(el('txAmount').value) || 0;
 
+        if (!date || !categoryId || amount <= 0) {
+            showToast('⚠️ Preencha todos os campos corretamente.', 'error');
+            return;
+        }
+
         if (id) {
             const index = state.transactions.findIndex(t => t.id === id);
             if (index !== -1) {
@@ -821,29 +1019,62 @@ const App = (() => {
 
         saveState();
         closeModal();
-        
-        const activePage = document.querySelector('.page.active')?.id;
-        if (activePage === 'dashboard' || !activePage) el('dashboard').innerHTML = renderDashboard();
-        else if (activePage === 'transactions') el('transactionsTable').innerHTML = renderTransactionsTable();
-        
-        showToast('Lançamento salvo com sucesso!');
+        refreshAllViews();
+        showToast('✅ Lançamento salvo!');
         syncToDrive();
     };
 
     const deleteTransaction = (id) => {
-        if (confirm('Deseja realmente excluir este lançamento?')) {
+        if (confirm('⚠️ Deseja realmente excluir este lançamento?')) {
             state.transactions = state.transactions.filter(t => t.id !== id);
             saveState();
-            
-            const activePage = document.querySelector('.page.active')?.id;
-            if (activePage === 'dashboard' || !activePage) el('dashboard').innerHTML = renderDashboard();
-            else if (activePage === 'transactions') el('transactionsTable').innerHTML = renderTransactionsTable();
-            
-            showToast('Lançamento removido.');
+            refreshAllViews();
+            showToast('🗑️ Lançamento removido.');
             syncToDrive();
         }
     };
 
+    // ==================== RENDER APP ====================
+    const renderApp = () => {
+        el('app').innerHTML = `
+            <div class="sidebar">
+                <div class="logo">
+                    <div style="display:flex;align-items:center;gap:12px">
+                        <div style="width:40px;height:40px;background:rgba(255,255,255,.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px">💶</div>
+                        <div><div style="font-weight:700;font-size:16px">FinFam</div><div style="font-size:11px;opacity:.7">ES 🇪🇸 & BR 🇧🇷</div></div>
+                    </div>
+                </div>
+                <div style="flex:1;padding:12px 0">
+                    <button class="nav-item active" data-page="dashboard" onclick="App.nav(this)"><span>📊</span> Dashboard</button>
+                    <button class="nav-item" data-page="transactions" onclick="App.nav(this)"><span>📝</span> Lançamentos</button>
+                    <button class="nav-item" data-page="reports" onclick="App.nav(this)"><span>📈</span> Relatórios</button>
+                    <button class="nav-item" data-page="settings" onclick="App.nav(this)"><span>⚙️</span> Configurações</button>
+                </div>
+                <div style="padding:16px;border-top:1px solid rgba(255,255,255,.1)">
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <div class="user-avatar">${state.currentUser?.name?.charAt(0).toUpperCase() || 'U'}</div>
+                        <div style="flex:1;min-width:0">
+                            <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${state.currentUser?.name || ''}</div>
+                            <button onclick="App.togglePrivacy()" style="background:none;border:none;color:rgba(255,255,255,.8);cursor:pointer;font-size:12px;padding:0">${state.privacyMode ? '👁️ Mostrar' : '🙈 Ocultar'}</button>
+                        </div>
+                        <button onclick="App.logout()" style="background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;font-size:18px" title="Sair">🚪</button>
+                    </div>
+                </div>
+            </div>
+            <div class="main-content">
+                <div id="dashboard" class="page active">${renderDashboard()}</div>
+                <div id="transactions" class="page">${renderTransactions()}</div>
+                <div id="reports" class="page">${renderMonthlyReport()}</div>
+                <div id="settings" class="page">${renderSettings()}</div>
+            </div>
+            
+            <div id="modalOverlay" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+                <div id="modalContent" class="modal" style="background:#fff; padding:24px; border-radius:12px; width:90%; max-width:550px; max-height:90vh; overflow-y:auto; box-shadow:0 10px 25px rgba(0,0,0,0.2);"></div>
+            </div>
+            <div id="toast" class="toast"></div>`;
+    };
+
+    // ==================== INIT ====================
     const init = () => {
         initState();
         if (!isSetup()) renderSetup();
@@ -854,12 +1085,28 @@ const App = (() => {
         }
     };
 
+    // EXPORTAR API PÚBLICA
     return {
-        init, doSetup, doLogin, logout, nav, togglePrivacy,
-        changeSelectedMonth, updateReportView, exportToExcel,
-        checkConnection, saveSettings, syncFromDrive, syncToDrive,
-        showTransactionModal, closeModal, saveTransaction, deleteTransaction, resetAllData
+        init,
+        doSetup,
+        doLogin,
+        logout,
+        nav,
+        togglePrivacy,
+        changeSelectedMonth,
+        checkConnection,
+        saveSettings,
+        syncFromDrive,
+        syncToDrive,
+        resetAllData,
+        showTransactionModal,
+        closeModal,
+        saveTransaction,
+        deleteTransaction,
+        exportToPDF,
+        exportToCSV
     };
 })();
 
+// Inicialização automática
 document.addEventListener('DOMContentLoaded', App.init);
