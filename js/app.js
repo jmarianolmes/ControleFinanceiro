@@ -704,24 +704,30 @@ const App = (() => {
         init();
     };
 
-    const nav = (element) => {
-        document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-        element.classList.add('active');
-        const targetPage = element.getAttribute('data-page');
-        const p = el(targetPage);
-        if (p) p.classList.add('active');
-        if (targetPage === 'dashboard') {
-            syncFromDrive(true);
-        } else if (targetPage === 'settings') {
-            checkConnection();
-            const settingsPage = el('settings');
-            if (settingsPage) settingsPage.innerHTML = renderSettings();
-        } else if (targetPage === 'reports') {
-            const reportContainer = el('reportContainer');
-            if (reportContainer) reportContainer.innerHTML = renderMonthlyReport();
+   const nav = (element) => {
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    element.classList.add('active');
+    const targetPage = element.getAttribute('data-page');
+    const p = el(targetPage);
+    if (p) p.classList.add('active');
+    
+    if (targetPage === 'dashboard') {
+        syncFromDrive(true);
+    } else if (targetPage === 'settings') {
+        checkConnection();
+        const settingsPage = el('settings');
+        if (settingsPage) settingsPage.innerHTML = renderSettings();
+    } else if (targetPage === 'reports') {
+        const reportContainer = el('reportContainer');
+        if (reportContainer) {
+            reportContainer.innerHTML = renderMonthlyReport();
+            // Atualiza o seletor para o mês atual
+            const monthPicker = el('reportMonthPicker');
+            if (monthPicker) monthPicker.value = state.selectedMonth;
         }
-    };
+    }
+};
 
     // ==================== RENDERIZAÇÃO ====================
     const renderLogin = () => {
@@ -930,190 +936,278 @@ const App = (() => {
         </div>`;
     };
 
-    // ==================== RELATÓRIOS MENSAIS ====================
-    const renderMonthlyReport = () => {
-        const ym = state.selectedMonth;
-        const [year, month] = ym.split('-');
-        const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleString('pt-BR', { month: 'long' });
-        
-        const monthTxs = state.transactions.filter(t => {
-            if (!t || !t.date) return false;
-            try {
-                const d = new Date(t.date);
-                return !isNaN(d.getTime()) && d.toISOString().slice(0, 7) === ym;
-            } catch (e) { return false; }
-        });
-        
-        const monthIncome = monthTxs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
-        const monthExpense = monthTxs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
-        const monthInvestment = monthTxs.filter(t => t.type === 'investment').reduce((s, t) => s + Number(t.amount), 0);
-        const monthBalance = monthIncome - monthExpense - monthInvestment;
-        
-        const yearTxs = state.transactions.filter(t => {
-            if (!t || !t.date) return false;
-            try {
-                const d = new Date(t.date);
-                return !isNaN(d.getTime()) && d.getFullYear() === parseInt(year);
-            } catch (e) { return false; }
-        });
-        
-        const yearIncome = yearTxs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
-        const yearExpense = yearTxs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
-        const yearInvestment = yearTxs.filter(t => t.type === 'investment').reduce((s, t) => s + Number(t.amount), 0);
-        const yearBalance = yearIncome - yearExpense - yearInvestment;
+   // ==================== RELATÓRIOS MENSAIS ====================
+const renderMonthlyReport = () => {
+    const ym = state.selectedMonth;
+    const [year, month] = ym.split('-');
+    const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleString('pt-BR', { month: 'long' });
+    
+    // Gera opções de meses para o select (últimos 12 meses)
+    const monthOptions = [];
+    for (let i = 0; i < 12; i++) {
+        const d = new Date(parseInt(year), parseInt(month) - 1 - i, 1);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const label = d.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+        monthOptions.push({ value: `${y}-${m}`, label: label });
+    }
+    
+    // Dados do mês selecionado
+    const monthTxs = state.transactions.filter(t => {
+        if (!t || !t.date) return false;
+        try {
+            const d = new Date(t.date);
+            return !isNaN(d.getTime()) && d.toISOString().slice(0, 7) === ym;
+        } catch (e) { return false; }
+    });
+    
+    const monthIncome = monthTxs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+    const monthExpense = monthTxs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+    const monthInvestment = monthTxs.filter(t => t.type === 'investment').reduce((s, t) => s + Number(t.amount), 0);
+    const monthBalance = monthIncome - monthExpense - monthInvestment;
+    
+    // Dados acumulados do ano
+    const yearTxs = state.transactions.filter(t => {
+        if (!t || !t.date) return false;
+        try {
+            const d = new Date(t.date);
+            return !isNaN(d.getTime()) && d.getFullYear() === parseInt(year);
+        } catch (e) { return false; }
+    });
+    
+    const yearIncome = yearTxs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
+    const yearExpense = yearTxs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
+    const yearInvestment = yearTxs.filter(t => t.type === 'investment').reduce((s, t) => s + Number(t.amount), 0);
+    const yearBalance = yearIncome - yearExpense - yearInvestment;
 
-        const totalInvestments = state.transactions
-            .filter(t => t.type === 'investment')
-            .reduce((s, t) => s + Number(t.amount), 0);
-        const totalBalance = state.transactions
-            .filter(t => t.type === 'income')
-            .reduce((s, t) => s + Number(t.amount), 0) -
-            state.transactions.filter(t => t.type === 'expense')
-            .reduce((s, t) => s + Number(t.amount), 0);
-        const netWorth = totalBalance + totalInvestments;
+    const totalInvestments = state.transactions
+        .filter(t => t.type === 'investment')
+        .reduce((s, t) => s + Number(t.amount), 0);
+    const totalBalance = state.transactions
+        .filter(t => t.type === 'income')
+        .reduce((s, t) => s + Number(t.amount), 0) -
+        state.transactions.filter(t => t.type === 'expense')
+        .reduce((s, t) => s + Number(t.amount), 0);
+    const netWorth = totalBalance + totalInvestments;
 
-        return `
-        <div class="card no-print" style="padding:20px;margin-bottom:24px">
-            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-                <div>
-                    <h3 style="margin:0;color:var(--navy)">📊 Relatório Mensal - ${monthName} ${year}</h3>
-                    <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">${monthTxs.length} lançamentos no período</p>
-                </div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap">
-                    <button class="btn-primary" style="background:#dc2626" onclick="App.exportToPDF()">📄 PDF</button>
-                    <button class="btn-primary" style="background:#10b981" onclick="App.exportToCSV()">📊 CSV</button>
-                </div>
+    // Constrói o HTML do select de meses
+    const monthSelectOptions = monthOptions.map(m => 
+        `<option value="${m.value}" ${m.value === ym ? 'selected' : ''}>${m.label}</option>`
+    ).join('');
+
+    return `
+    <div class="card no-print" style="padding:20px;margin-bottom:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
+            <div>
+                <h3 style="margin:0;color:var(--navy)">📊 Relatório Mensal</h3>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">${monthTxs.length} lançamentos no período</p>
+            </div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+                <!-- SELETOR DE MÊS -->
+                <select id="reportMonthPicker" class="input-field" style="padding:8px 12px;font-weight:600;width:auto;min-width:150px;" onchange="App.changeReportMonth(this.value)">
+                    ${monthSelectOptions}
+                </select>
+                <!-- BOTÕES DE EXPORTAÇÃO -->
+                <button class="btn-primary" style="background:#dc2626" onclick="App.exportToPDF()">📄 PDF</button>
+                <button class="btn-primary" style="background:#10b981" onclick="App.exportToCSV()">📊 CSV</button>
             </div>
         </div>
+    </div>
 
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-bottom:24px">
-            <div class="card" style="padding:20px">
-                <h4 style="margin:0 0 16px;color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px">📆 Mês: ${ym}</h4>
-                <div style="display:grid;gap:10px">
-                    <div><span class="badge badge-success">Receitas:</span> <strong>${fmtMoney(monthIncome, state.settings.currencyES)}</strong></div>
-                    <div><span class="badge badge-danger">Despesas:</span> <strong>${fmtMoney(monthExpense, state.settings.currencyES)}</strong></div>
-                    <div><span class="badge badge-purple">Investimentos:</span> <strong>${fmtMoney(monthInvestment, state.settings.currencyES)}</strong></div>
-                    <div style="border-top:2px solid var(--border);padding-top:10px;font-size:18px;font-weight:bold;color:${monthBalance >= 0 ? 'var(--emerald)' : 'var(--danger)'}">
-                        Saldo: ${fmtMoney(monthBalance, state.settings.currencyES)}
-                    </div>
-                </div>
-            </div>
-
-            <div class="card" style="padding:20px">
-                <h4 style="margin:0 0 16px;color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px">📈 Acumulado ${year}</h4>
-                <div style="display:grid;gap:10px">
-                    <div><span class="badge badge-success">Receitas:</span> <strong>${fmtMoney(yearIncome, state.settings.currencyES)}</strong></div>
-                    <div><span class="badge badge-danger">Despesas:</span> <strong>${fmtMoney(yearExpense, state.settings.currencyES)}</strong></div>
-                    <div><span class="badge badge-purple">Investimentos:</span> <strong>${fmtMoney(yearInvestment, state.settings.currencyES)}</strong></div>
-                    <div style="border-top:2px solid var(--border);padding-top:10px;font-size:18px;font-weight:bold;color:${yearBalance >= 0 ? 'var(--emerald)' : 'var(--danger)'}">
-                        Saldo: ${fmtMoney(yearBalance, state.settings.currencyES)}
-                    </div>
-                </div>
-            </div>
-
-            <div class="card" style="padding:20px;background:linear-gradient(135deg,#fffbeb 0%,#fff 100%);border-left:4px solid #f59e0b">
-                <h4 style="margin:0 0 16px;color:#92400e;border-bottom:2px solid #fde68a;padding-bottom:8px">🏦 Patrimônio Total</h4>
-                <div style="display:grid;gap:10px">
-                    <div style="font-size:28px;font-weight:800;color:#d97706">
-                        ${fmtMoney(netWorth, state.settings.currencyES)}
-                    </div>
-                    <div style="font-size:13px;color:var(--text-light)">
-                        Investimentos acumulados: ${fmtMoney(totalInvestments, state.settings.currencyES)}
-                    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-bottom:24px">
+        <div class="card" style="padding:20px">
+            <h4 style="margin:0 0 16px;color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px">📆 Mês: ${monthName} ${year}</h4>
+            <div style="display:grid;gap:10px">
+                <div><span class="badge badge-success">Receitas:</span> <strong>${fmtMoney(monthIncome, state.settings.currencyES)}</strong></div>
+                <div><span class="badge badge-danger">Despesas:</span> <strong>${fmtMoney(monthExpense, state.settings.currencyES)}</strong></div>
+                <div><span class="badge badge-purple">Investimentos:</span> <strong>${fmtMoney(monthInvestment, state.settings.currencyES)}</strong></div>
+                <div style="border-top:2px solid var(--border);padding-top:10px;font-size:18px;font-weight:bold;color:${monthBalance >= 0 ? 'var(--emerald)' : 'var(--danger)'}">
+                    Saldo: ${fmtMoney(monthBalance, state.settings.currencyES)}
                 </div>
             </div>
         </div>
 
         <div class="card" style="padding:20px">
-            <h4 style="margin:0 0 16px;color:var(--navy)">📋 Lançamentos do Mês</h4>
-            ${monthTxs.length === 0 ? '<div class="empty-state"><p>Nenhum lançamento neste mês.</p></div>' : `
-            <div class="table-container">
-                <table class="data-table">
-                    <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Valor</th></tr></thead>
-                    <tbody>${monthTxs.map(t => {
-                        const cat = state.categories.find(c => c.id === t.categoryId) || {name:'Geral'};
-                        return `<tr>
-                            <td>${fmtDate(t.date)}</td>
-                            <td><span class="badge ${t.type === 'income' ? 'badge-success' : t.type === 'investment' ? 'badge-purple' : 'badge-danger'}">${t.type === 'income' ? 'Receita' : t.type === 'investment' ? 'Investimento' : 'Despesa'}</span></td>
-                            <td>${cat.icon} ${cat.name}</td>
-                            <td>${t.description || '-'}</td>
-                            <td style="font-weight:600">${fmtMoney(t.amount, state.settings.currencyES)}</td>
-                        </tr>`;
-                    }).join('')}</tbody>
-                </table>
-            </div>`}
-        </div>`;
-    };
-
-    // ==================== EXPORTAÇÕES ====================
-    const exportToPDF = () => {
-        const content = document.getElementById('reportContainer');
-        if (!content) return;
-        
-        showToast('🔄 Gerando PDF...', 'info');
-        
-        const opt = {
-            margin: 1,
-            filename: `Relatorio_FinFam_${state.selectedMonth}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true },
-            jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
-        };
-        
-        const header = document.createElement('div');
-        const monthName = new Date(parseInt(state.selectedMonth.split('-')[0]), parseInt(state.selectedMonth.split('-')[1]) - 1)
-            .toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
-        header.innerHTML = `
-            <div style="text-align:center;margin-bottom:20px;color:#1e3a5f;padding:20px;border-bottom:3px solid #1e3a5f;">
-                <h1 style="font-size:24px;margin:0;">📊 Relatório Financeiro</h1>
-                <h2 style="font-size:18px;margin:5px 0;color:#2c5282;">${monthName}</h2>
-                <p style="color:#64748b;margin:5px 0 0;">Controle Familiar FinFam</p>
+            <h4 style="margin:0 0 16px;color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px">📈 Acumulado ${year}</h4>
+            <div style="display:grid;gap:10px">
+                <div><span class="badge badge-success">Receitas:</span> <strong>${fmtMoney(yearIncome, state.settings.currencyES)}</strong></div>
+                <div><span class="badge badge-danger">Despesas:</span> <strong>${fmtMoney(yearExpense, state.settings.currencyES)}</strong></div>
+                <div><span class="badge badge-purple">Investimentos:</span> <strong>${fmtMoney(yearInvestment, state.settings.currencyES)}</strong></div>
+                <div style="border-top:2px solid var(--border);padding-top:10px;font-size:18px;font-weight:bold;color:${yearBalance >= 0 ? 'var(--emerald)' : 'var(--danger)'}">
+                    Saldo: ${fmtMoney(yearBalance, state.settings.currencyES)}
+                </div>
             </div>
-        `;
-        
-        const clone = content.cloneNode(true);
-        const wrapper = document.createElement('div');
-        wrapper.appendChild(header);
-        wrapper.appendChild(clone);
-        
-        wrapper.querySelectorAll('.no-print, button').forEach(el => el.remove());
-        
-        html2pdf().set(opt).from(wrapper).save().then(() => {
+        </div>
+
+        <div class="card" style="padding:20px;background:linear-gradient(135deg,#fffbeb 0%,#fff 100%);border-left:4px solid #f59e0b">
+            <h4 style="margin:0 0 16px;color:#92400e;border-bottom:2px solid #fde68a;padding-bottom:8px">🏦 Patrimônio Total</h4>
+            <div style="display:grid;gap:10px">
+                <div style="font-size:28px;font-weight:800;color:#d97706">
+                    ${fmtMoney(netWorth, state.settings.currencyES)}
+                </div>
+                <div style="font-size:13px;color:var(--text-light)">
+                    Investimentos acumulados: ${fmtMoney(totalInvestments, state.settings.currencyES)}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LISTA DE LANÇAMENTOS DO MÊS -->
+    <div class="card" style="padding:20px">
+        <h4 style="margin:0 0 16px;color:var(--navy)">📋 Lançamentos do Mês</h4>
+        ${monthTxs.length === 0 ? '<div class="empty-state"><p>Nenhum lançamento neste mês.</p></div>' : `
+        <div class="table-container">
+            <table class="data-table">
+                <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Valor</th></tr></thead>
+                <tbody>${monthTxs.map(t => {
+                    const cat = state.categories.find(c => c.id === t.categoryId) || {name:'Geral'};
+                    return `<tr>
+                        <td>${fmtDate(t.date)}</td>
+                        <td><span class="badge ${t.type === 'income' ? 'badge-success' : t.type === 'investment' ? 'badge-purple' : 'badge-danger'}">${t.type === 'income' ? 'Receita' : t.type === 'investment' ? 'Investimento' : 'Despesa'}</span></td>
+                        <td>${cat.icon} ${cat.name}</td>
+                        <td>${t.description || '-'}</td>
+                        <td style="font-weight:600">${fmtMoney(t.amount, state.settings.currencyES)}</td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table>
+        </div>`}
+    </div>`;
+};
+
+    // ==================== MUDAR MÊS DO RELATÓRIO ====================
+const changeReportMonth = (ym) => {
+    if (!ym) return;
+    state.selectedMonth = ym;
+    saveState();
+    const reportContainer = el('reportContainer');
+    if (reportContainer) {
+        reportContainer.innerHTML = renderMonthlyReport();
+    }
+    // Atualiza também o seletor do Dashboard
+    const monthPicker = el('dashMonthPicker');
+    if (monthPicker) monthPicker.value = ym;
+};
+
+// ==================== EXPORTAÇÃO CSV ====================
+const exportToCSV = () => {
+    const ym = state.selectedMonth;
+    const txs = state.transactions.filter(t => {
+        if (!t || !t.date) return false;
+        try {
+            const d = new Date(t.date);
+            return !isNaN(d.getTime()) && d.toISOString().slice(0, 7) === ym;
+        } catch (e) { return false; }
+    });
+    
+    if (!txs.length) { 
+        showToast('⚠️ Nenhum dado para exportar neste mês.', 'error'); 
+        return; 
+    }
+    
+    // Cabeçalhos do CSV
+    let csv = 'Data;Tipo;Categoria;Descrição;Responsável;País;Valor\n';
+    
+    // Dados
+    txs.forEach(t => {
+        const cat = state.categories.find(c => c.id === t.categoryId)?.name || 'Geral';
+        const tipo = t.type === 'income' ? 'Receita' : t.type === 'investment' ? 'Investimento' : 'Despesa';
+        const valor = Number(t.amount).toFixed(2).replace('.', ',');
+        csv += `${fmtDate(t.date)};${tipo};${cat};${t.description || ''};${t.assignedTo || 'Casal'};${t.country || 'ES'};${valor}\n`;
+    });
+    
+    // Cria o arquivo
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `Relatorio_FinFam_${ym}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+    
+    showToast(`✅ CSV exportado com sucesso! (${txs.length} registros)`);
+};
+    
+   // ==================== EXPORTAÇÃO PDF ====================
+const exportToPDF = () => {
+    const content = document.getElementById('reportContainer');
+    if (!content) {
+        showToast('❌ Nenhum conteúdo para exportar.', 'error');
+        return;
+    }
+    
+    // Verifica se há dados para exportar
+    const hasData = content.querySelector('table tbody tr');
+    if (!hasData) {
+        showToast('⚠️ Nenhum lançamento neste mês para exportar.', 'error');
+        return;
+    }
+    
+    showToast('🔄 Gerando PDF...', 'info');
+    
+    // Cria um clone do conteúdo para o PDF
+    const clone = content.cloneNode(true);
+    
+    // Remove botões do clone
+    clone.querySelectorAll('.no-print, button, select').forEach(el => el.remove());
+    
+    // Cria o wrapper com cabeçalho
+    const wrapper = document.createElement('div');
+    wrapper.style.padding = '20px';
+    wrapper.style.fontFamily = 'Arial, sans-serif';
+    
+    const ym = state.selectedMonth;
+    const [year, month] = ym.split('-');
+    const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+    
+    wrapper.innerHTML = `
+        <div style="text-align:center;margin-bottom:30px;padding-bottom:20px;border-bottom:3px solid #1e3a5f;">
+            <h1 style="font-size:24px;margin:0;color:#1e3a5f;">📊 Relatório Financeiro FinFam</h1>
+            <h2 style="font-size:18px;margin:5px 0;color:#2c5282;">${monthName}</h2>
+            <p style="color:#64748b;margin:5px 0 0;">Controle Financeiro Familiar</p>
+            <p style="color:#64748b;font-size:12px;margin-top:5px;">Gerado em: ${new Date().toLocaleDateString('pt-BR')}</p>
+        </div>
+    `;
+    
+    // Adiciona o clone (sem os cabeçalhos que já estão no wrapper)
+    const cloneContent = clone.cloneNode(true);
+    // Remove o primeiro card (que tem os botões)
+    const firstCard = cloneContent.querySelector('.card.no-print');
+    if (firstCard) firstCard.remove();
+    
+    wrapper.appendChild(cloneContent);
+    
+    // Configuração do PDF
+    const opt = {
+        margin: [10, 10, 10, 10],
+        filename: `Relatorio_FinFam_${ym}.pdf`,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { 
+            scale: 2, 
+            useCORS: true,
+            logging: false,
+            letterRendering: true
+        },
+        jsPDF: { 
+            unit: 'mm', 
+            format: 'a4', 
+            orientation: 'portrait' 
+        },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+    };
+    
+    html2pdf()
+        .set(opt)
+        .from(wrapper)
+        .save()
+        .then(() => {
             showToast('✅ PDF gerado com sucesso!');
-        }).catch(() => {
-            showToast('❌ Erro ao gerar PDF.', 'error');
+        })
+        .catch((err) => {
+            console.error('Erro PDF:', err);
+            showToast('❌ Erro ao gerar PDF. Tente novamente.', 'error');
         });
-    };
-
-    const exportToCSV = () => {
-        const ym = state.selectedMonth;
-        const txs = state.transactions.filter(t => {
-            if (!t || !t.date) return false;
-            try {
-                const d = new Date(t.date);
-                return !isNaN(d.getTime()) && d.toISOString().slice(0, 7) === ym;
-            } catch (e) { return false; }
-        });
-        
-        if (!txs.length) { 
-            showToast('⚠️ Nenhum dado para exportar.', 'error'); 
-            return; 
-        }
-        
-        let csv = 'Data;Tipo;Categoria;Descricao;Responsavel;Pais;Valor\n';
-        txs.forEach(t => {
-            const cat = state.categories.find(c => c.id === t.categoryId)?.name || '';
-            csv += `${t.date};${t.type};${cat};${t.description || ''};${t.assignedTo || ''};${t.country || ''};${t.amount}\n`;
-        });
-        
-        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `Relatorio_FinFam_${ym}.csv`;
-        link.click();
-        showToast('✅ CSV exportado com sucesso!');
-    };
-
+};
     // ==================== CONFIGURAÇÕES ====================
     const renderSettings = () => {
         return `
@@ -1383,6 +1477,7 @@ const App = (() => {
         closeModal,
         saveTransaction,
         deleteTransaction,
+        changeReportMonth,
         exportToPDF,
         exportToCSV,
         addUser,
