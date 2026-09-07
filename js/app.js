@@ -1,7 +1,6 @@
 const App = (() => {
     const STORAGE_KEY = 'finfam_data_v1';
     const SESSION_KEY = 'finfam_session';
-    const GIST_KEY = 'finfam_gist_config';
 
     let state = {
         users: [],
@@ -13,8 +12,15 @@ const App = (() => {
     };
     let charts = {};
 
+    // --- HELPER FUNCTIONS ---
     const el = id => document.getElementById(id);
-    const fmtDate = d => new Date(d).toLocaleDateString('pt-BR');
+    
+    const fmtDate = d => {
+        if (!d) return '-';
+        const parts = d.split('-');
+        if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+        return new Date(d).toLocaleDateString('pt-BR');
+    };
 
     const fmtMoney = (v, currency) => {
         const n = Number(v);
@@ -24,12 +30,10 @@ const App = (() => {
 
     const simpleHash = (value) => {
         let hash = 2166136261;
-
         for (let i = 0; i < value.length; i++) {
             hash ^= value.charCodeAt(i);
             hash = Math.imul(hash, 16777619);
         }
-
         return (hash >>> 0).toString(16);
     };
 
@@ -38,7 +42,6 @@ const App = (() => {
             if (window.crypto?.subtle) {
                 const data = new TextEncoder().encode(value);
                 const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-
                 return Array.from(new Uint8Array(hashBuffer))
                     .map(b => b.toString(16).padStart(2, '0'))
                     .join('');
@@ -46,23 +49,20 @@ const App = (() => {
         } catch (err) {
             console.warn('crypto.subtle indisponível, usando fallback:', err);
         }
-
         return simpleHash(value);
     };
 
+    // --- TOAST NOTIFICATIONS ---
     let pendingToast = null;
 
     const showToast = (msg, type = 'success') => {
         const t = el('toast');
-
         if (!t) {
             pendingToast = { msg, type };
             return;
         }
-
         t.textContent = String(msg);
         t.className = `toast ${type} show`;
-
         setTimeout(() => {
             t.classList.remove('show');
         }, 3000);
@@ -70,34 +70,39 @@ const App = (() => {
 
     const flushPendingToast = () => {
         if (!pendingToast) return;
-
         const pending = pendingToast;
         pendingToast = null;
-
         showToast(pending.msg, pending.type);
     };
 
     const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
     const now = () => new Date().toISOString();
 
+    // --- CATEGORIAS PADRÃO (VALENCIA & BRASIL) ---
     const defaultCategories = [
-        { id: 'cat_aluguel', name: 'Aluguel (Receita)', type: 'income', country: 'BR', icon: '🏠' },
+        // Receitas
+        { id: 'cat_aluguel_br', name: 'Receita Aluguel (BR)', type: 'income', country: 'BR', icon: '🏠' },
+        { id: 'cat_outra_receita', name: 'Outras Receitas', type: 'income', country: 'ES', icon: '💰' },
+        
+        // Despesas Brasil
         { id: 'cat_cc_br', name: 'Cartão de Crédito BR', type: 'expense', country: 'BR', icon: '💳' },
+        { id: 'cat_outros_br', name: 'Compromissos BR', type: 'expense', country: 'BR', icon: '🇧🇷' },
+
+        // Despesas Espanha (València)
         { id: 'cat_agua', name: 'Água', type: 'expense', country: 'ES', icon: '💧' },
-        { id: 'cat_luz', name: 'Luz / Eletricidade', type: 'expense', country: 'ES', icon: '⚡' },
-        { id: 'cat_internet', name: 'Internet + TV', type: 'expense', country: 'ES', icon: '🌐' },
-        { id: 'cat_telefone', name: 'Telefone / Celular', type: 'expense', country: 'ES', icon: '📱' },
-        { id: 'cat_escola', name: 'Escola das Crianças', type: 'expense', country: 'ES', icon: '🎒' },
-        { id: 'cat_metro', name: 'Transporte / Metro', type: 'expense', country: 'ES', icon: '🚇' },
-        { id: 'cat_saude', name: 'Seguro Saúde', type: 'expense', country: 'ES', icon: '🏥' },
-        { id: 'cat_alimentacao', name: 'Alimentação / Mercado', type: 'expense', country: 'ES', icon: '🛒' },
-        { id: 'cat_lazer', name: 'Lazer / Entretenimento', type: 'expense', country: 'ES', icon: '🎬' },
-        { id: 'cat_compras', name: 'Compras / Utensílios', type: 'expense', country: 'ES', icon: '🛍️' },
-        { id: 'cat_trabalho', name: 'Material de Trabalho', type: 'expense', country: 'ES', icon: '💼' },
-        { id: 'cat_outros_br', name: 'Outros (BR)', type: 'expense', country: 'BR', icon: '📋' },
+        { id: 'cat_luz', name: 'Energia / Eletricidade', type: 'expense', country: 'ES', icon: '⚡' },
+        { id: 'cat_mercado', name: 'Mercado / Alimentação', type: 'expense', country: 'ES', icon: '🛒' },
+        { id: 'cat_escola', name: 'Escola das Crianças (10 e 7a)', type: 'expense', country: 'ES', icon: '🎒' },
+        { id: 'cat_metro', name: 'Metrô / Transporte público', type: 'expense', country: 'ES', icon: '🚇' },
+        { id: 'cat_saude', name: 'Seguro Saúde Familiar', type: 'expense', country: 'ES', icon: '🏥' },
+        { id: 'cat_telecom', name: 'Internet + 2 Celulares', type: 'expense', country: 'ES', icon: '📱' },
+        { id: 'cat_utensilios', name: 'Utensílios / Início de vida ES', type: 'expense', country: 'ES', icon: '📦' },
+        { id: 'cat_trabalho', name: 'Materiais de Trabalho', type: 'expense', country: 'ES', icon: '💻' },
+        { id: 'cat_lazer', name: 'Lazer & Família', type: 'expense', country: 'ES', icon: '🎬' },
         { id: 'cat_outros_es', name: 'Outros (ES)', type: 'expense', country: 'ES', icon: '📋' }
     ];
 
+    // --- PERSISTÊNCIA DE DADOS ---
     const initState = () => {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
@@ -111,9 +116,12 @@ const App = (() => {
 
     const resetState = () => {
         state = {
-            users: [], transactions: [], categories: [...defaultCategories],
+            users: [], 
+            transactions: [], 
+            categories: [...defaultCategories],
             settings: { currencyBR: 'R$', currencyES: '€', monthStartDay: 1 },
-            currentUser: null, sessionExpiry: null
+            currentUser: null, 
+            sessionExpiry: null
         };
         saveState();
     };
@@ -122,6 +130,15 @@ const App = (() => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     };
 
+    const resetAllData = () => {
+        if (confirm('Isso apagará todos os dados locais e redefinirá o sistema para o primeiro cadastro. Deseja continuar?')) {
+            localStorage.clear();
+            sessionStorage.clear();
+            location.reload();
+        }
+    };
+
+    // --- GESTÃO DE SESSÃO ---
     const getSession = () => {
         const raw = sessionStorage.getItem(SESSION_KEY);
         if (!raw) return null;
@@ -135,7 +152,7 @@ const App = (() => {
         } catch (e) { return null; }
     };
 
-    const setSession = (userId, hours = 8) => {
+    const setSession = (userId, hours = 12) => {
         const expires = new Date(Date.now() + hours * 3600000).toISOString();
         sessionStorage.setItem(SESSION_KEY, JSON.stringify({ userId, expires }));
         state.currentUser = state.users.find(u => u.id === userId);
@@ -156,6 +173,7 @@ const App = (() => {
         return true;
     };
 
+    // --- CÁLCULOS FINANCEIROS ROBUSTOS ---
     const getMonthRange = (year, month) => {
         const start = new Date(year, month - 1, state.settings.monthStartDay || 1);
         const end = new Date(year, month, state.settings.monthStartDay || 1);
@@ -211,8 +229,8 @@ const App = (() => {
                     amount: 0,
                     count: 0,
                     category: state.categories.find(c => c.id === t.categoryId) || {
-                        name: 'Desconhecida',
-                        icon: '❓'
+                        name: 'Outros',
+                        icon: '📋'
                     }
                 };
             }
@@ -231,6 +249,7 @@ const App = (() => {
         return months;
     };
 
+    // --- AUTENTICAÇÃO E SETUP ---
     const doSetup = async () => {
         try {
             const name = el('setupName')?.value.trim();
@@ -267,14 +286,11 @@ const App = (() => {
             saveState();
             setSession(user.id);
             renderApp();
-            showToast('Conta criada com sucesso!');
+            showToast('Conta principal criada com sucesso!');
 
         } catch (err) {
             console.error('Erro em doSetup:', err);
-            showToast(
-                'Erro ao criar a conta: ' + (err?.message || 'erro desconhecido'),
-                'error'
-            );
+            showToast('Erro ao criar a conta: ' + (err?.message || 'erro desconhecido'), 'error');
         }
     };
 
@@ -288,9 +304,7 @@ const App = (() => {
                 return;
             }
 
-            const user = state.users.find(
-                u => String(u.email).toLowerCase() === email
-            );
+            const user = state.users.find(u => String(u.email).toLowerCase() === email);
 
             if (!user) {
                 showToast('Usuário ou senha inválidos.', 'error');
@@ -305,14 +319,11 @@ const App = (() => {
 
             setSession(user.id);
             renderApp();
-            showToast('Login efetuado com sucesso!');
+            showToast(`Bem-vindo(a), ${user.name}!`);
 
         } catch (err) {
             console.error('Erro em doLogin:', err);
-            showToast(
-                'Erro ao entrar: ' + (err?.message || 'erro desconhecido'),
-                'error'
-            );
+            showToast('Erro ao entrar: ' + (err?.message || 'erro desconhecido'), 'error');
         }
     };
 
@@ -321,20 +332,24 @@ const App = (() => {
         renderLogin();
     };
 
+    // --- TELAS DO SISTEMA ---
     const renderLogin = () => {
         const app = el('app');
         app.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
             <div style="background:#fff;border-radius:20px;padding:40px;max-width:420px;width:90%;box-shadow:0 25px 80px rgba(0,0,0,.3)">
                 <div style="text-align:center;margin-bottom:28px">
-                    <div style="width:64px;height:64px;background:var(--navy);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">💰</div>
+                    <div style="width:64px;height:64px;background:var(--navy);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">💶</div>
                     <h1 style="margin:0;font-size:24px;color:var(--navy)">Controle Financeiro</h1>
-                    <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">Familiar - Brasil & Espanha</p>
+                    <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">València 🇪🇸 & Brasil 🇧🇷</p>
                 </div>
                 <div id="loginForm">
                     <div class="form-group"><label class="form-label">Email</label><input type="email" id="loginEmail" class="input-field" placeholder="seu@email.com"></div>
                     <div class="form-group"><label class="form-label">Senha</label><input type="password" id="loginPwd" class="input-field" placeholder="Sua senha"></div>
                     <button class="btn-primary" style="width:100%;padding:14px" onclick="App.doLogin()">Entrar</button>
-                    <p style="text-align:center;margin-top:16px;font-size:13px;color:var(--text-light)">Acesso exclusivo para você e sua família.</p>
+                    <div style="text-align:center;margin-top:20px;display:flex;flex-direction:column;gap:10px">
+                        <p style="margin:0;font-size:13px;color:var(--text-light)">Acesso restrito ao casal.</p>
+                        <button onclick="App.resetAllData()" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;text-decoration:underline">Redefinir Dados / Criar Conta do Zero</button>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -346,13 +361,13 @@ const App = (() => {
             <div style="background:#fff;border-radius:20px;padding:40px;max-width:480px;width:90%;box-shadow:0 25px 80px rgba(0,0,0,.3)">
                 <div style="text-align:center;margin-bottom:28px">
                     <div style="width:64px;height:64px;background:var(--navy);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">🔐</div>
-                    <h1 style="margin:0;font-size:24px;color:var(--navy)">Configuração Inicial</h1>
-                    <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">Cadastre o primeiro usuário administrador</p>
+                    <h1 style="margin:0;font-size:24px;color:var(--navy)">Primeiro Acesso</h1>
+                    <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">Cadastre o usuário administrador da família</p>
                 </div>
                 <div id="setupForm">
                     <div class="form-group"><label class="form-label">Nome Completo</label><input type="text" id="setupName" class="input-field" placeholder="Ex: João Silva"></div>
                     <div class="form-group"><label class="form-label">Email</label><input type="email" id="setupEmail" class="input-field" placeholder="joao@email.com"></div>
-                    <div class="form-group"><label class="form-label">Senha (mínimo 6 caracteres)</label><input type="password" id="setupPwd" class="input-field" placeholder="Crie uma senha segura"></div>
+                    <div class="form-group"><label class="form-label">Senha (mínimo 6 caracteres)</label><input type="password" id="setupPwd" class="input-field" placeholder="Sua senha"></div>
                     <div class="form-group"><label class="form-label">Confirmar Senha</label><input type="password" id="setupPwd2" class="input-field" placeholder="Repita a senha"></div>
                     <button class="btn-primary" style="width:100%;padding:14px" onclick="App.doSetup()">Criar Conta Administrador</button>
                 </div>
@@ -365,8 +380,8 @@ const App = (() => {
         app.innerHTML = `<div class="sidebar">
             <div class="logo">
                 <div style="display:flex;align-items:center;gap:12px">
-                    <div style="width:40px;height:40px;background:rgba(255,255,255,.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px">💰</div>
-                    <div><div style="font-weight:700;font-size:16px">FinFam</div><div style="font-size:11px;opacity:.7">BR & ES</div></div>
+                    <div style="width:40px;height:40px;background:rgba(255,255,255,.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px">💶</div>
+                    <div><div style="font-weight:700;font-size:16px">FinFam</div><div style="font-size:11px;opacity:.7">ES 🇪🇸 & BR 🇧🇷</div></div>
                 </div>
             </div>
             <div style="flex:1;padding:12px 0">
@@ -380,7 +395,7 @@ const App = (() => {
                     <div class="user-avatar">${state.currentUser?.name?.charAt(0).toUpperCase() || 'U'}</div>
                     <div style="flex:1;min-width:0">
                         <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${state.currentUser?.name || ''}</div>
-                        <div style="font-size:11px;opacity:.7">${state.currentUser?.role === 'admin' ? 'Admin' : 'Usuário'}</div>
+                        <div style="font-size:11px;opacity:.7">${state.currentUser?.role === 'admin' ? 'Administrador' : 'Usuário'}</div>
                     </div>
                     <button onclick="App.logout()" style="background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;font-size:18px;padding:4px" title="Sair">🚪</button>
                 </div>
@@ -404,38 +419,46 @@ const App = (() => {
         const totals = getMonthTotals(year, month);
         const recent = state.transactions.slice().sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
         const monthName = new Date(year, month - 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
-        return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+        
+        return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
             <div>
                 <h2 style="margin:0;font-size:22px;color:var(--navy)">Dashboard</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Resumo de ${monthName}</p>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Resumo financeiro - ${monthName}</p>
             </div>
-            <div class="sync-status" id="syncStatus"><span>💾</span> Dados locais</div>
+            <button class="btn-primary" onclick="App.showAddTransactionModal()">+ Novo Lançamento</button>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px">
-            <div class="card stat-card"><div class="stat-label">Saldo do Mês</div><div class="stat-value ${totals.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(totals.balance, totals.balance >= 0 ? state.settings.currencyES : '')}</div></div>
-            <div class="card stat-card"><div class="stat-label">Entradas</div><div class="stat-value emerald-text">${fmtMoney(totals.income, state.settings.currencyES)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Saídas</div><div class="stat-value danger-text">${fmtMoney(totals.expense, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Saldo do Mês</div><div class="stat-value ${totals.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(totals.balance, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Total Entradas</div><div class="stat-value emerald-text">${fmtMoney(totals.income, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Total Saídas</div><div class="stat-value danger-text">${fmtMoney(totals.expense, state.settings.currencyES)}</div></div>
             <div class="card stat-card"><div class="stat-label">Lançamentos</div><div class="stat-value" style="color:var(--navy)">${totals.count}</div></div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:16px;margin-bottom:24px">
             <div class="card" style="padding:20px">
-                <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📊 Despesas por Categoria</h3>
+                <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📊 Gastos por Categoria (${monthName})</h3>
                 <div class="chart-container"><canvas id="chartCategories"></canvas></div>
             </div>
             <div class="card" style="padding:20px">
-                <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📈 Evolução Anual</h3>
+                <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📈 Evolução Anual (${year})</h3>
                 <div class="chart-container"><canvas id="chartYearly"></canvas></div>
             </div>
         </div>
         <div class="card" style="padding:20px">
-            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">🕐 Lançamentos Recentes</h3>
-            ${recent.length === 0 ? `<div class="empty-state"><div style="font-size:48px;margin-bottom:12px">📝</div><p>Sem lançamentos ainda</p></div>` : `
+            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">🕐 Últimos Lançamentos</h3>
+            ${recent.length === 0 ? `<div class="empty-state"><div style="font-size:48px;margin-bottom:12px">📝</div><p>Nenhum lançamento registrado ainda.</p></div>` : `
             <div class="table-container">
                 <table class="data-table">
                     <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>País</th><th>Valor</th><th>Tipo</th></tr></thead>
                     <tbody>${recent.map(t => {
-                        const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Desconhecida', icon: '❓' };
-                        return `<tr><td>${fmtDate(t.date)}</td><td><span class="category-tag">${cat.icon} ${cat.name}</span></td><td>${t.description || '-'}</td><td><span class="badge ${t.country === 'BR' ? 'badge-info' : 'badge-warning'}">${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</span></td><td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES)}</td><td><span class="badge ${t.type === 'income' ? 'badge-success' : 'badge-danger'}">${t.type === 'income' ? 'Entrada' : 'Saída'}</span></td></tr>`;
+                        const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
+                        return `<tr>
+                            <td>${fmtDate(t.date)}</td>
+                            <td><span class="category-tag">${cat.icon} ${cat.name}</span></td>
+                            <td>${t.description || '-'}</td>
+                            <td><span class="badge ${t.country === 'BR' ? 'badge-info' : 'badge-warning'}">${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</span></td>
+                            <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES)}</td>
+                            <td><span class="badge ${t.type === 'income' ? 'badge-success' : 'badge-danger'}">${t.type === 'income' ? 'Entrada' : 'Saída'}</span></td>
+                        </tr>`;
                     }).join('')}</tbody>
                 </table>
             </div>`}
@@ -462,7 +485,7 @@ const App = (() => {
                 },
                 options: {
                     responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { position: 'bottom', labels: { padding: 16, font: { size: 12 } } } }
+                    plugins: { legend: { position: 'bottom', labels: { padding: 12, font: { size: 11 } } } }
                 }
             });
         }
@@ -489,8 +512,12 @@ const App = (() => {
     };
 
     const renderTransactions = () => {
-        return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
-            <div><h2 style="margin:0;font-size:22px;color:var(--navy)">Lançamentos</h2><p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Gerencie entradas e saídas</p></div>
+        return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+            <div>
+                <h2 style="margin:0;font-size:22px;color:var(--navy)">Lançamentos</h2>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Registro de entradas e saídas (Espanha & Brasil)</p>
+            </div>
+            <button class="btn-primary" onclick="App.showAddTransactionModal()">+ Novo Lançamento</button>
         </div>
         <div class="card" style="padding:20px">
             <div id="transactionsTable">${renderTransactionsTable()}</div>
@@ -499,47 +526,256 @@ const App = (() => {
 
     const renderTransactionsTable = () => {
         const txs = state.transactions.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-        if (txs.length === 0) return `<div class="empty-state"><div style="font-size:48px;margin-bottom:12px">🔍</div><p>Nenhum lançamento encontrado</p></div>`;
+        if (txs.length === 0) {
+            return `<div class="empty-state"><div style="font-size:48px;margin-bottom:12px">💳</div><p>Nenhum lançamento cadastrado. Clique no botão acima para adicionar.</p></div>`;
+        }
         return `<div class="table-container">
             <table class="data-table">
-                <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>País</th><th>Valor</th><th>Tipo</th></tr></thead>
+                <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>País</th><th>Valor</th><th>Tipo</th><th>Ações</th></tr></thead>
                 <tbody>${txs.map(t => {
-                    const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Desconhecida', icon: '❓' };
-                    return `<tr><td>${fmtDate(t.date)}</td><td><span class="category-tag">${cat.icon} ${cat.name}</span></td><td>${t.description || '-'}</td><td><span class="badge ${t.country === 'BR' ? 'badge-info' : 'badge-warning'}">${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</span></td><td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES)}</td><td><span class="badge ${t.type === 'income' ? 'badge-success' : 'badge-danger'}">${t.type === 'income' ? 'Entrada' : 'Saída'}</span></td></tr>`;
+                    const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
+                    return `<tr>
+                        <td>${fmtDate(t.date)}</td>
+                        <td><span class="category-tag">${cat.icon} ${cat.name}</span></td>
+                        <td>${t.description || '-'}</td>
+                        <td><span class="badge ${t.country === 'BR' ? 'badge-info' : 'badge-warning'}">${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</span></td>
+                        <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES)}</td>
+                        <td><span class="badge ${t.type === 'income' ? 'badge-success' : 'badge-danger'}">${t.type === 'income' ? 'Entrada' : 'Saída'}</span></td>
+                        <td><button onclick="App.deleteTransaction('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px" title="Excluir">🗑️</button></td>
+                    </tr>`;
                 }).join('')}</tbody>
             </table>
         </div>`;
     };
 
     const renderReports = () => {
+        const { year, month } = getCurrentMonth();
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
-            <div><h2 style="margin:0;font-size:22px;color:var(--navy)">Relatório Mensal</h2><p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Análise detalhada por país e categoria</p></div>
+            <div>
+                <h2 style="margin:0;font-size:22px;color:var(--navy)">Relatório Mensal</h2>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Detalhamento por país e categoria</p>
+            </div>
         </div>
-        <div id="reportContent">${renderReportContent(new Date().getFullYear(), new Date().getMonth() + 1)}</div>`;
+        <div id="reportContent">${renderReportContent(year, month)}</div>`;
     };
 
     const renderReportContent = (year, month) => {
         const catTotals = getCategoryTotals(year, month);
-        return `<div class="card" style="padding:20px">
-            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📊 Despesas por Categoria</h3>
-            <div>${catTotals.map(c => `<div>${c.category.icon} ${c.category.name}: ${fmtMoney(c.amount, state.settings.currencyES)}</div>`).join('')}</div>
+        const totals = getMonthTotals(year, month);
+
+        return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:24px">
+            <div class="card" style="padding:20px">
+                <h4 style="margin:0 0 12px;color:var(--text-light)">Resumo Financeiro</h4>
+                <div style="font-size:24px;font-weight:700;margin-bottom:8px" class="${totals.balance >= 0 ? 'emerald-text' : 'danger-text'}">
+                    ${fmtMoney(totals.balance, state.settings.currencyES)}
+                </div>
+                <div style="font-size:13px;color:var(--text-light)">Entradas: <strong class="emerald-text">${fmtMoney(totals.income, state.settings.currencyES)}</strong> | Saídas: <strong class="danger-text">${fmtMoney(totals.expense, state.settings.currencyES)}</strong></div>
+            </div>
+        </div>
+        <div class="card" style="padding:20px">
+            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📊 Detalhamento de Despesas por Categoria</h3>
+            ${catTotals.length === 0 ? '<p style="color:var(--text-light)">Sem registros para o mês atual.</p>' : `
+            <div class="table-container">
+                <table class="data-table">
+                    <thead><tr><th>Categoria</th><th>Quantidade</th><th>Total Gasto</th></tr></thead>
+                    <tbody>${catTotals.map(c => `<tr>
+                        <td><span class="category-tag">${c.category.icon} ${c.category.name}</span></td>
+                        <td>${c.count} lançamento(s)</td>
+                        <td style="font-weight:600">${fmtMoney(c.amount, state.settings.currencyES)}</td>
+                    </tr>`).join('')}</tbody>
+                </table>
+            </div>`}
         </div>`;
     };
 
     const renderUsersList = () => {
-        return state.users.map(u => `<div style="padding:8px 0;border-bottom:1px solid #eee">${u.name} (${u.email}) - <strong>${u.role}</strong></div>`).join('');
+        return state.users.map(u => `
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #eee">
+                <div>
+                    <div style="font-weight:600;color:var(--navy)">${u.name}</div>
+                    <div style="font-size:12px;color:var(--text-light)">${u.email}</div>
+                </div>
+                <span class="badge ${u.role === 'admin' ? 'badge-info' : 'badge-success'}">${u.role === 'admin' ? 'Administrador' : 'Acesso Família'}</span>
+            </div>
+        `).join('');
     };
 
     const renderSettings = () => {
-        return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
-            <div><h2 style="margin:0;font-size:22px;color:var(--navy)">Configurações</h2><p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Gerencie usuários, dados e sincronização</p></div>
+        return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+            <div>
+                <h2 style="margin:0;font-size:22px;color:var(--navy)">Configurações</h2>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Gerencie acessos do casal e preferências</p>
+            </div>
+            <button class="btn-primary" onclick="App.showAddUserModal()">+ Adicionar Familiar (Esposa/Marido)</button>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:16px">
             <div class="card" style="padding:24px">
-                <h3 style="margin:0 0 20px;font-size:16px;color:var(--navy)">👥 Usuários</h3>
+                <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">👥 Usuários Cadastrados</h3>
                 <div id="usersList">${renderUsersList()}</div>
             </div>
         </div>`;
+    };
+
+    // --- MODAIS E FORMULÁRIOS (AÇÕES) ---
+    const closeModal = () => {
+        const overlay = el('modalOverlay');
+        if (overlay) overlay.classList.remove('active');
+    };
+
+    const filterCategoriesByType = (type) => {
+        const select = el('txCategory');
+        if (!select) return;
+        const filtered = state.categories.filter(c => c.type === type);
+        select.innerHTML = filtered.map(c => `<option value="${c.id}">${c.icon} ${c.name} (${c.country})</option>`).join('');
+    };
+
+    const showAddTransactionModal = () => {
+        const overlay = el('modalOverlay');
+        const content = el('modalContent');
+        if (!overlay || !content) return;
+
+        const defaultType = 'expense';
+        const initialCats = state.categories.filter(c => c.type === defaultType);
+
+        content.innerHTML = `
+            <div class="modal-header">
+                <h3 class="modal-title">Novo Lançamento</h3>
+                <button class="close-btn" onclick="App.closeModal()">&times;</button>
+            </div>
+            <form onsubmit="event.preventDefault(); App.doSaveTransaction();">
+                <div class="form-group">
+                    <label class="form-label">Tipo de Operação</label>
+                    <select id="txType" class="input-field" onchange="App.filterCategoriesByType(this.value)">
+                        <option value="expense">Saída / Despesa</option>
+                        <option value="income">Entrada / Receita</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Valor</label>
+                    <input type="number" step="0.01" id="txAmount" class="input-field" placeholder="0.00" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Categoria</label>
+                    <select id="txCategory" class="input-field" required>
+                        ${initialCats.map(c => `<option value="${c.id}">${c.icon} ${c.name} (${c.country})</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">País / Moeda</label>
+                    <select id="txCountry" class="input-field">
+                        <option value="ES">🇪🇸 Espanha (€ Euro)</option>
+                        <option value="BR">🇧🇷 Brasil (R$ Real)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Data</label>
+                    <input type="date" id="txDate" class="input-field" value="${new Date().toISOString().split('T')[0]}" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Descrição / Observação</label>
+                    <input type="text" id="txDesc" class="input-field" placeholder="Ex: Consum Mercado, Seguro Saúde, etc.">
+                </div>
+                <button type="submit" class="btn-primary" style="width:100%;margin-top:10px">Salvar Lançamento</button>
+            </form>
+        `;
+        overlay.classList.add('active');
+    };
+
+    const doSaveTransaction = () => {
+        const amount = parseFloat(el('txAmount').value);
+        const categoryId = el('txCategory').value;
+        const type = el('txType').value;
+        const country = el('txCountry').value;
+        const date = el('txDate').value;
+        const description = el('txDesc').value.trim();
+
+        if (!amount || amount <= 0) {
+            showToast('Informe um valor válido.', 'error');
+            return;
+        }
+
+        const newTx = {
+            id: generateId(),
+            amount,
+            categoryId,
+            type,
+            country,
+            date,
+            description,
+            userId: state.currentUser.id,
+            createdAt: now()
+        };
+
+        state.transactions.push(newTx);
+        saveState();
+        closeModal();
+        renderApp();
+        showToast('Lançamento cadastrado com sucesso!');
+    };
+
+    const deleteTransaction = (id) => {
+        if (confirm('Deseja realmente remover este lançamento?')) {
+            state.transactions = state.transactions.filter(t => t.id !== id);
+            saveState();
+            renderApp();
+            showToast('Lançamento removido.');
+        }
+    };
+
+    const showAddUserModal = () => {
+        const overlay = el('modalOverlay');
+        const content = el('modalContent');
+        if (!overlay || !content) return;
+
+        content.innerHTML = `
+            <div class="modal-header">
+                <h3 class="modal-title">Adicionar Familiar</h3>
+                <button class="close-btn" onclick="App.closeModal()">&times;</button>
+            </div>
+            <form onsubmit="event.preventDefault(); App.doAddUser();">
+                <div class="form-group">
+                    <label class="form-label">Nome Completo</label>
+                    <input type="text" id="newUserName" class="input-field" placeholder="Ex: Maria Silva" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Email de Acesso</label>
+                    <input type="email" id="newUserEmail" class="input-field" placeholder="maria@email.com" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Senha Inicial</label>
+                    <input type="password" id="newUserPwd" class="input-field" placeholder="Mínimo 6 caracteres" required minlength="6">
+                </div>
+                <button type="submit" class="btn-primary" style="width:100%;margin-top:10px">Cadastrar Usuário</button>
+            </form>
+        `;
+        overlay.classList.add('active');
+    };
+
+    const doAddUser = async () => {
+        const name = el('newUserName').value.trim();
+        const email = el('newUserEmail').value.trim().toLowerCase();
+        const pwd = el('newUserPwd').value;
+
+        if (state.users.some(u => u.email === email)) {
+            showToast('Este e-mail já está cadastrado.', 'error');
+            return;
+        }
+
+        const passwordHash = await hashPwd(pwd);
+        const newUser = {
+            id: generateId(),
+            name,
+            email,
+            passwordHash,
+            role: 'user',
+            createdAt: now()
+        };
+
+        state.users.push(newUser);
+        saveState();
+        closeModal();
+        renderApp();
+        showToast('Familiar cadastrado! Já pode fazer login.');
     };
 
     const nav = (elem) => {
@@ -565,7 +801,15 @@ const App = (() => {
         doLogin,
         doSetup,
         logout,
-        nav
+        nav,
+        resetAllData,
+        showAddTransactionModal,
+        doSaveTransaction,
+        deleteTransaction,
+        showAddUserModal,
+        doAddUser,
+        closeModal,
+        filterCategoriesByType
     };
 })();
 
