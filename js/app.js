@@ -4,8 +4,6 @@ const App = (() => {
     const DEFAULT_TOKEN = 'FinFam_SecureToken_2026_@Key';
     const INACTIVITY_TIMEOUT = 15 * 60 * 1000;
 
-    const getCurrentMonthStr = () => new Date().toISOString().slice(0, 7);
-
     let state = {
         users: [],
         transactions: [],
@@ -14,16 +12,18 @@ const App = (() => {
         currentUser: null,
         sessionExpiry: null,
         privacyMode: false,
-        selectedMonth: getCurrentMonthStr()
+        selectedMonth: new Date().toISOString().slice(0, 7) // 'YYYY-MM'
     };
 
     let inactivityTimer = null;
+
     const el = id => document.getElementById(id);
 
     const fmtDate = d => {
         if (!d) return '-';
         const parts = d.split('-');
-        return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : new Date(d).toLocaleDateString('pt-BR');
+        if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+        return new Date(d).toLocaleDateString('pt-BR');
     };
 
     const fmtMoney = (v, currency) => {
@@ -69,21 +69,34 @@ const App = (() => {
 
     const defaultCategories = [
         { id: 'cat_salario_es', name: 'Salário / Emprego', type: 'income', country: 'ES', icon: '💼' },
-        { id: 'cat_freelance_es', name: 'Freelance / Extras', type: 'income', country: 'ES', icon: '💻' },
-        { id: 'cat_aluguel_br', name: 'Receita Aluguel BR', type: 'income', country: 'BR', icon: '🏠' },
-        { id: 'cat_invest_es', name: 'Aporte / Investimentos ES', type: 'investment', country: 'ES', icon: '📈' },
-        { id: 'cat_invest_br', name: 'Aporte / Investimentos BR', type: 'investment', country: 'BR', icon: '🇧🇷' },
-        { id: 'cat_aluguel_es', name: 'Aluguel Moradia', type: 'expense', country: 'ES', icon: '🔑' },
+        { id: 'cat_freelance_es', name: 'Trabalho Freelance / Extras', type: 'income', country: 'ES', icon: '💻' },
+        { id: 'cat_outras_entradas_es', name: 'Outras Receitas', type: 'income', country: 'ES', icon: '💶' },
+        { id: 'cat_aluguel_br', name: 'Receita Aluguel', type: 'income', country: 'BR', icon: '🏠' },
+        { id: 'cat_outras_entradas_br', name: 'Outras Receitas', type: 'income', country: 'BR', icon: '🇧🇷' },
+        { id: 'cat_aluguel_es', name: 'Aluguel de Moradia', type: 'expense', country: 'ES', icon: '🔑' },
         { id: 'cat_hipoteca_es', name: 'Hipoteca / Financiamento', type: 'expense', country: 'ES', icon: '🏛️' },
-        { id: 'cat_agua', name: 'Água / Luz / Gás', type: 'expense', country: 'ES', icon: '⚡' },
+        { id: 'cat_comunidad', name: 'Comunidad / Condomínio', type: 'expense', country: 'ES', icon: '🏢' },
+        { id: 'cat_agua', name: 'Água', type: 'expense', country: 'ES', icon: '💧' },
+        { id: 'cat_luz', name: 'Energia / Luz', type: 'expense', country: 'ES', icon: '⚡' },
+        { id: 'cat_gas', name: 'Gás', type: 'expense', country: 'ES', icon: '🔥' },
         { id: 'cat_mercado', name: 'Mercado / Alimentação', type: 'expense', country: 'ES', icon: '🛒' },
         { id: 'cat_escola', name: 'Escola / Crianças', type: 'expense', country: 'ES', icon: '🎒' },
-        { id: 'cat_transporte', name: 'Transporte / Veículo', type: 'expense', country: 'ES', icon: '🚗' },
+        { id: 'cat_metro', name: 'Metrô / Transporte Público', type: 'expense', country: 'ES', icon: '🚇' },
+        { id: 'cat_veiculo', name: 'Veículo / Manutenção', type: 'expense', country: 'ES', icon: '🚗' },
+        { id: 'cat_combustivel', name: 'Combustível', type: 'expense', country: 'ES', icon: '⛽' },
+        { id: 'cat_seguros', name: 'Seguros', type: 'expense', country: 'ES', icon: '🛡️' },
+        { id: 'cat_impostos', name: 'Impostos / Tasas / IRPF', type: 'expense', country: 'ES', icon: '🧾' },
+        { id: 'cat_telecom', name: 'Internet + Celulares', type: 'expense', country: 'ES', icon: '📱' },
+        { id: 'cat_utensilios', name: 'Utensílios / Casa', type: 'expense', country: 'ES', icon: '📦' },
+        { id: 'cat_trabalho', name: 'Materiais de Trabalho', type: 'expense', country: 'ES', icon: '💻' },
         { id: 'cat_lazer', name: 'Lazer & Família', type: 'expense', country: 'ES', icon: '🎬' },
-        { id: 'cat_outros_es', name: 'Outras Despesas ES', type: 'expense', country: 'ES', icon: '📋' },
-        { id: 'cat_cc_br', name: 'Cartão de Crédito BR', type: 'expense', country: 'BR', icon: '💳' }
+        { id: 'cat_outros_es', name: 'Outras Despesas', type: 'expense', country: 'ES', icon: '📋' },
+        { id: 'cat_cc_br', name: 'Cartão de Crédito', type: 'expense', country: 'BR', icon: '💳' },
+        { id: 'cat_impostos_br', name: 'Impostos / Taxas', type: 'expense', country: 'BR', icon: '🧾' },
+        { id: 'cat_outros_br', name: 'Compromissos Diversos', type: 'expense', country: 'BR', icon: '🇧🇷' }
     ];
 
+    // --- COMUNICAÇÃO DRIVE ---
     const syncToDrive = async () => {
         const url = state.settings.googleScriptUrl;
         if (!url) return;
@@ -94,37 +107,59 @@ const App = (() => {
                 body: JSON.stringify({
                     action: 'sync',
                     token: state.settings.apiToken || DEFAULT_TOKEN,
-                    transactions: state.transactions,
-                    categories: state.categories
+                    transactions: state.transactions
                 })
             });
             const data = await res.json();
-            if (data.status === 'success') showToast('Dados sincronizados no Google Drive!');
-            else showToast(data.message || 'Erro ao sincronizar.', 'error');
+            if (data.status === 'success') {
+                showToast('Dados salvos no Google Drive!');
+            } else {
+                showToast(data.message || 'Erro ao salvar no Drive.', 'error');
+            }
         } catch (e) {
-            showToast('Erro de comunicação com o Drive.', 'error');
+            console.error('Erro de sincronização:', e);
+            showToast('Erro ao comunicar com o Drive.', 'error');
         }
     };
 
     const syncFromDrive = async (silent = false) => {
         const url = state.settings.googleScriptUrl;
-        if (!url) { if (!silent) showToast('URL do Apps Script não configurada.', 'error'); return; }
+        if (!url) { 
+            if (!silent) showToast('URL do Drive não configurada.', 'error'); 
+            return; 
+        }
         try {
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ action: 'fetch', token: state.settings.apiToken || DEFAULT_TOKEN })
+                body: JSON.stringify({
+                    action: 'fetch',
+                    token: state.settings.apiToken || DEFAULT_TOKEN
+                })
             });
             const data = await res.json();
             if (data.status === 'success' && data.transactions) {
                 state.transactions = data.transactions;
-                if (data.categories && data.categories.length > 0) state.categories = data.categories;
                 saveState();
-                renderCurrentPage();
+                
+                const activePage = document.querySelector('.page.active')?.id;
+                if (activePage === 'dashboard') {
+                    const dash = el('dashboard');
+                    if (dash) dash.innerHTML = renderDashboard();
+                } else if (activePage === 'transactions') {
+                    const txTable = el('transactionsTable');
+                    if (txTable) txTable.innerHTML = renderTransactionsTable();
+                } else if (activePage === 'reports') {
+                    updateReportView();
+                }
+
                 if (!silent) showToast('Dados atualizados do Google Drive!');
+            } else if (data.message && !silent) {
+                showToast(data.message, 'error');
             }
         } catch (e) {
-            if (!silent) showToast('Erro ao buscar dados do Drive.', 'error');
+            console.error('Erro ao buscar do Drive:', e);
+            if (!silent) showToast('Erro ao consultar o Google Drive.', 'error');
         }
     };
 
@@ -132,14 +167,23 @@ const App = (() => {
         const dot = el('connStatusDot');
         const text = el('connStatusText');
         const url = state.settings.googleScriptUrl;
+
         if (!dot || !text) return;
-        if (!url) { dot.style.backgroundColor = '#ef4444'; text.textContent = 'URL não configurada'; return; }
-        text.textContent = 'Verificando...'; dot.style.backgroundColor = '#f59e0b';
+
+        if (!url) {
+            dot.style.backgroundColor = '#ef4444';
+            text.textContent = 'URL não configurada';
+            return;
+        }
+
+        text.textContent = 'Verificando...';
+        dot.style.backgroundColor = '#f59e0b';
+
         try {
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ action: 'fetch', token: state.settings.apiToken || DEFAULT_TOKEN })
+                body: JSON.stringify({ action: 'ping', token: state.settings.apiToken || DEFAULT_TOKEN })
             });
             const data = await res.json();
             if (data.status === 'success') {
@@ -147,10 +191,11 @@ const App = (() => {
                 text.textContent = 'Conectado ao Google Drive';
             } else {
                 dot.style.backgroundColor = '#ef4444';
-                text.textContent = 'Erro de Autenticação/Token';
+                text.textContent = data.message || 'Erro de validação do Token';
             }
         } catch (e) {
-            dot.style.backgroundColor = '#ef4444'; text.textContent = 'Desconectado / Erro de Rede';
+            dot.style.backgroundColor = '#ef4444';
+            text.textContent = 'Desconectado / Erro de Rede';
         }
     };
 
@@ -158,11 +203,10 @@ const App = (() => {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
             try {
-                const parsed = JSON.parse(raw);
-                state = { ...state, ...parsed };
-                if (!state.categories || state.categories.length === 0) state.categories = [...defaultCategories];
+                state = JSON.parse(raw);
+                state.categories = [...defaultCategories];
+                if (!state.selectedMonth) state.selectedMonth = new Date().toISOString().slice(0, 7);
                 if (!state.settings) state.settings = { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '', apiToken: DEFAULT_TOKEN };
-                if (!state.selectedMonth) state.selectedMonth = getCurrentMonthStr();
             } catch (e) { resetState(); }
         } else { resetState(); }
     };
@@ -171,12 +215,18 @@ const App = (() => {
         state = {
             users: [], transactions: [], categories: [...defaultCategories],
             settings: { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '', apiToken: DEFAULT_TOKEN },
-            currentUser: null, sessionExpiry: null, privacyMode: false, selectedMonth: getCurrentMonthStr()
+            currentUser: null, sessionExpiry: null, privacyMode: false, selectedMonth: new Date().toISOString().slice(0, 7)
         };
         saveState();
     };
 
     const saveState = () => { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); };
+
+    const resetAllData = () => {
+        if (confirm('Isso apagará todas as configurações locais. Deseja continuar?')) {
+            localStorage.clear(); sessionStorage.clear(); location.reload();
+        }
+    };
 
     const getSession = () => {
         const raw = sessionStorage.getItem(SESSION_KEY);
@@ -199,6 +249,7 @@ const App = (() => {
     const clearSession = () => {
         sessionStorage.removeItem(SESSION_KEY);
         state.currentUser = null;
+        state.sessionExpiry = null;
         if (inactivityTimer) clearTimeout(inactivityTimer);
     };
 
@@ -210,58 +261,33 @@ const App = (() => {
         return true;
     };
 
-    const togglePrivacy = () => { state.privacyMode = !state.privacyMode; renderApp(); };
+    const togglePrivacy = () => {
+        state.privacyMode = !state.privacyMode;
+        renderApp();
+    };
+
+    const filterTransactionsByRange = (startDate, endDate) => {
+        return state.transactions.filter(t => {
+            if (!t.date) return false;
+            if (startDate && t.date < startDate) return false;
+            if (endDate && t.date > endDate) return false;
+            return true;
+        }).sort((a, b) => new Date(b.date) - new Date(a.date));
+    };
 
     const getSelectedMonthData = () => {
-        const ym = state.selectedMonth || getCurrentMonthStr();
-        // Filtra transações cuja data comece com YYYY-MM
-        const txs = state.transactions.filter(t => t.date && t.date.slice(0, 7) === ym).sort((a, b) => new Date(b.date) - new Date(a.date));
-        
+        const ym = state.selectedMonth; // 'YYYY-MM'
+        const txs = state.transactions.filter(t => t.date && t.date.startsWith(ym)).sort((a, b) => new Date(b.date) - new Date(a.date));
         const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
         const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
-        const investment = txs.filter(t => t.type === 'investment').reduce((s, t) => s + (Number(t.amount) || 0), 0);
-        
-        // Saldo disponível em caixa no mês (Receitas - Despesas Operacionais - Investimentos/Aportes)
-        const balance = income - expense - investment;
-        
-        // Patrimônio acumulado histórico total em investimentos
-        const totalPatrimony = state.transactions.filter(t => t.type === 'investment').reduce((s, t) => s + (Number(t.amount) || 0), 0);
-
-        // Agrupamento de Despesas por Categoria para Eficiência Financeira
-        const catMap = {};
-        txs.filter(t => t.type === 'expense').forEach(t => {
-            const cid = t.categoryId || 'cat_outros_es';
-            catMap[cid] = (catMap[cid] || 0) + (Number(t.amount) || 0);
-        });
-
-        const catBreakdown = Object.keys(catMap).map(cid => {
-            const cat = state.categories.find(c => c.id === cid) || { name: 'Outros', icon: '📋' };
-            const amount = catMap[cid];
-            const pct = expense > 0 ? ((amount / expense) * 100).toFixed(1) : 0;
-            return { ...cat, amount, pct: Number(pct) };
-        }).sort((a, b) => b.amount - a.amount);
-
-        return { income, expense, investment, balance, totalPatrimony, catBreakdown, count: txs.length, txs };
+        return { income, expense, balance: income - expense, count: txs.length, txs };
     };
 
     const changeSelectedMonth = (ym) => {
         if (!ym) return;
         state.selectedMonth = ym;
         saveState();
-        renderCurrentPage();
-    };
-
-    const renderCurrentPage = () => {
-        const activePage = document.querySelector('.page.active')?.id || 'dashboard';
-        if (activePage === 'dashboard') {
-            const dash = el('dashboard'); if (dash) dash.innerHTML = renderDashboard();
-        } else if (activePage === 'transactions') {
-            const txTable = el('transactionsTable'); if (txTable) txTable.innerHTML = renderTransactionsTable();
-        } else if (activePage === 'reports') {
-            const rep = el('reports'); if (rep) rep.innerHTML = renderReports();
-        } else if (activePage === 'settings') {
-            const set = el('settings'); if (set) set.innerHTML = renderSettings();
-        }
+        renderApp();
     };
 
     const doSetup = async () => {
@@ -274,7 +300,7 @@ const App = (() => {
         if (pwd !== pwd2) { showToast('Senhas não coincidem.', 'error'); return; }
         const passwordHash = await hashPwd(pwd);
         const user = { id: generateId(), name, email, passwordHash, role: 'admin', createdAt: now() };
-        state.users = [user]; saveState(); setSession(user.id); renderApp(); showToast('Conta criada com sucesso!');
+        state.users = [user]; saveState(); setSession(user.id); renderApp(); showToast('Conta criada!');
     };
 
     const doLogin = async () => {
@@ -282,10 +308,13 @@ const App = (() => {
         const pwd = el('loginPwd')?.value;
         if (!email || !pwd) { showToast('Preencha e-mail e senha.', 'error'); return; }
         const user = state.users.find(u => String(u.email).toLowerCase() === email);
-        if (!user) { showToast('Credenciais inválidas.', 'error'); return; }
+        if (!user) { showToast('Usuário ou senha inválidos.', 'error'); return; }
         const hash = await hashPwd(pwd);
-        if (user.passwordHash !== hash) { showToast('Credenciais inválidas.', 'error'); return; }
-        setSession(user.id); renderApp(); showToast(`Bem-vindo, ${user.name}!`);
+        if (user.passwordHash !== hash) { showToast('Usuário ou senha inválidos.', 'error'); return; }
+        setSession(user.id); 
+        renderApp(); 
+        showToast(`Bem-vindo(a), ${user.name}!`);
+        syncFromDrive(true);
     };
 
     const logout = () => { clearSession(); renderLogin(); };
@@ -297,8 +326,12 @@ const App = (() => {
         const targetPage = element.getAttribute('data-page');
         const p = el(targetPage);
         if (p) p.classList.add('active');
-        if (targetPage === 'dashboard') syncFromDrive(true);
-        else if (targetPage === 'settings') checkConnection();
+
+        if (targetPage === 'dashboard') {
+            syncFromDrive(true);
+        } else if (targetPage === 'settings') {
+            checkConnection();
+        }
     };
 
     const renderLogin = () => {
@@ -306,14 +339,15 @@ const App = (() => {
             <div style="background:#fff;border-radius:20px;padding:40px;max-width:420px;width:90%;box-shadow:0 25px 80px rgba(0,0,0,.3)">
                 <div style="text-align:center;margin-bottom:28px">
                     <div style="width:64px;height:64px;background:var(--navy);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">💶</div>
-                    <h1 style="margin:0;font-size:24px;color:var(--navy)">FinFam Control</h1>
-                    <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">Gestão de Finanças Família ES 🇪🇸 & BR 🇧🇷</p>
+                    <h1 style="margin:0;font-size:24px;color:var(--navy)">Controle Financeiro</h1>
+                    <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">València 🇪🇸 & Brasil 🇧🇷</p>
                 </div>
                 <form id="loginForm" onsubmit="event.preventDefault(); App.doLogin();">
-                    <div class="form-group"><label class="form-label">Email</label><input type="email" id="loginEmail" class="input-field" required></div>
-                    <div class="form-group"><label class="form-label">Senha</label><input type="password" id="loginPwd" class="input-field" required></div>
+                    <div class="form-group"><label class="form-label">Email</label><input type="email" id="loginEmail" autocomplete="username" class="input-field" required></div>
+                    <div class="form-group"><label class="form-label">Senha</label><input type="password" id="loginPwd" autocomplete="current-password" class="input-field" required></div>
                     <button type="submit" class="btn-primary" style="width:100%;padding:14px">Entrar com Segurança</button>
                 </form>
+                <div style="text-align:center;margin-top:20px"><button onclick="App.resetAllData()" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;text-decoration:underline">Redefinir Dados Locais</button></div>
             </div>
         </div>`;
     };
@@ -322,15 +356,16 @@ const App = (() => {
         el('app').innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
             <div style="background:#fff;border-radius:20px;padding:40px;max-width:480px;width:90%;box-shadow:0 25px 80px rgba(0,0,0,.3)">
                 <div style="text-align:center;margin-bottom:28px">
-                    <h1 style="margin:0;font-size:24px;color:var(--navy)">Configuração Inicial</h1>
-                    <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">Cadastre a conta principal do sistema</p>
+                    <div style="width:64px;height:64px;background:var(--navy);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">🔐</div>
+                    <h1 style="margin:0;font-size:24px;color:var(--navy)">Primeiro Acesso</h1>
+                    <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">Cadastre o administrador do sistema</p>
                 </div>
                 <form onsubmit="event.preventDefault(); App.doSetup();">
                     <div class="form-group"><label class="form-label">Nome Completo</label><input type="text" id="setupName" class="input-field" required></div>
                     <div class="form-group"><label class="form-label">Email</label><input type="email" id="setupEmail" class="input-field" required></div>
                     <div class="form-group"><label class="form-label">Senha</label><input type="password" id="setupPwd" class="input-field" required minlength="6"></div>
                     <div class="form-group"><label class="form-label">Confirmar Senha</label><input type="password" id="setupPwd2" class="input-field" required minlength="6"></div>
-                    <button type="submit" class="btn-primary" style="width:100%;padding:14px">Criar Conta</button>
+                    <button type="submit" class="btn-primary" style="width:100%;padding:14px">Criar Conta Segura</button>
                 </form>
             </div>
         </div>`;
@@ -347,7 +382,7 @@ const App = (() => {
             <div style="flex:1;padding:12px 0">
                 <div class="nav-item active" data-page="dashboard" onclick="App.nav(this)"><span>📊</span> Dashboard</div>
                 <div class="nav-item" data-page="transactions" onclick="App.nav(this)"><span>📝</span> Lançamentos</div>
-                <div class="nav-item" data-page="reports" onclick="App.nav(this)"><span>📈</span> Relatórios</div>
+                <div class="nav-item" data-page="reports" onclick="App.nav(this)"><span>📈</span> Relatório & Exportação</div>
                 <div class="nav-item" data-page="settings" onclick="App.nav(this)"><span>⚙️</span> Configurações</div>
             </div>
             <div style="padding:16px;border-top:1px solid rgba(255,255,255,.1)">
@@ -355,9 +390,9 @@ const App = (() => {
                     <div class="user-avatar">${state.currentUser?.name?.charAt(0).toUpperCase() || 'U'}</div>
                     <div style="flex:1;min-width:0">
                         <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${state.currentUser?.name || ''}</div>
-                        <button onclick="App.togglePrivacy()" style="background:none;border:none;color:rgba(255,255,255,.8);cursor:pointer;font-size:12px;padding:0;margin-top:2px">${state.privacyMode ? '👁️ Mostrar' : '🙈 Ocultar'}</button>
+                        <button onclick="App.togglePrivacy()" style="background:none;border:none;color:rgba(255,255,255,.8);cursor:pointer;font-size:12px;padding:0;margin-top:2px">${state.privacyMode ? '👁️ Mostrar Valores' : '🙈 Ocultar Valores'}</button>
                     </div>
-                    <button onclick="App.logout()" style="background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;font-size:18px;padding:4px">🚪</button>
+                    <button onclick="App.logout()" style="background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;font-size:18px;padding:4px" title="Sair">🚪</button>
                 </div>
             </div>
         </div>
@@ -373,78 +408,29 @@ const App = (() => {
 
     const renderDashboard = () => {
         const m = getSelectedMonthData();
-        const savingsRate = m.income > 0 ? ((m.investment / m.income) * 100).toFixed(1) : 0;
-        const expenseRate = m.income > 0 ? Math.min(100, ((m.expense / m.income) * 100)).toFixed(1) : 0;
-        const freeCashRate = (100 - expenseRate - savingsRate).toFixed(1);
 
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
             <div>
-                <h2 style="margin:0;font-size:22px;color:var(--navy)">Dashboard Estratégico</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Visão de caixa e construção de patrimônio</p>
+                <h2 style="margin:0;font-size:22px;color:var(--navy)">Dashboard</h2>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Resumo do Mês Selecionado</p>
             </div>
             <div style="display:flex;gap:10px;align-items:center">
                 <input type="month" id="dashMonthPicker" class="input-field" style="padding:8px 12px;font-weight:600;color:var(--navy)" value="${state.selectedMonth}" onchange="App.changeSelectedMonth(this.value)">
                 <button class="btn-primary" onclick="App.showAddTransactionModal()">+ Novo Lançamento</button>
             </div>
         </div>
-
-        <!-- CARDS DE METRICAS PRINCIPAIS -->
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
-            <div class="card stat-card"><div class="stat-label">Entradas (Receitas)</div><div class="stat-value emerald-text">${fmtMoney(m.income, state.settings.currencyES)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Despesas Operacionais</div><div class="stat-value danger-text">${fmtMoney(m.expense, state.settings.currencyES)}</div></div>
-            <div class="card stat-card" style="border-left:4px solid #0284c7"><div class="stat-label">Aportes / Investidos (Mês)</div><div class="stat-value" style="color:#0284c7">${fmtMoney(m.investment, state.settings.currencyES)}</div><div style="font-size:11px;color:var(--text-light);margin-top:2px">Taxa de Aporte: ${savingsRate}%</div></div>
-            <div class="card stat-card"><div class="stat-label">Caixa Livre Restante</div><div class="stat-value ${m.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.balance, state.settings.currencyES)}</div></div>
-            <div class="card stat-card" style="background:linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%)"><div class="stat-label">🏛️ Patrimônio Acumulado Total</div><div class="stat-value" style="color:var(--navy)">${fmtMoney(m.totalPatrimony, state.settings.currencyES)}</div></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px">
+            <div class="card stat-card"><div class="stat-label">Saldo do Mês</div><div class="stat-value ${m.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.balance, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Entradas</div><div class="stat-value emerald-text">${fmtMoney(m.income, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Saídas</div><div class="stat-value danger-text">${fmtMoney(m.expense, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Total Registros</div><div class="stat-value" style="color:var(--navy)">${m.count}</div></div>
         </div>
-
-        <!-- SEÇÃO DE GRÁFICOS E EFICIÊNCIA ESTRATÉGICA -->
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-bottom:24px">
-            
-            <!-- GRÁFICO 1: DISTRIBUIÇÃO DO RENT/RECEITA -->
-            <div class="card" style="padding:20px">
-                <h3 style="margin:0 0 12px;font-size:15px;color:var(--navy)">📊 Eficiência de Alocação da Receita</h3>
-                <p style="font-size:12px;color:var(--text-light);margin-bottom:16px">Distribuição percentual das entradas do mês selecionado:</p>
-                
-                <div style="height:24px;width:100%;background:#e2e8f0;border-radius:12px;overflow:hidden;display:flex;margin-bottom:16px">
-                    <div style="width:${expenseRate}%;background:#ef4444" title="Despesas: ${expenseRate}%"></div>
-                    <div style="width:${savingsRate}%;background:#0284c7" title="Investimentos: ${savingsRate}%"></div>
-                </div>
-
-                <div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600">
-                    <div style="color:#ef4444">🔴 Despesas: ${expenseRate}%</div>
-                    <div style="color:#0284c7">🔵 Investimento: ${savingsRate}%</div>
-                    <div style="color:#10b981">🟢 Saldo Livre: ${freeCashRate}%</div>
-                </div>
-            </div>
-
-            <!-- GRÁFICO 2: IMPACTO POR CATEGORIA DE DESPESA (%) -->
-            <div class="card" style="padding:20px">
-                <h3 style="margin:0 0 12px;font-size:15px;color:var(--navy)">🏷️ Impacto por Categoria de Despesa (%)</h3>
-                ${m.catBreakdown.length === 0 ? '<div style="font-size:13px;color:var(--text-light)">Sem despesas no mês selecionado.</div>' : `
-                    <div style="display:flex;flex-direction:column;gap:12px">
-                        ${m.catBreakdown.slice(0, 5).map(c => `
-                            <div>
-                                <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
-                                    <span style="font-weight:600">${c.icon} ${c.name}</span>
-                                    <span><strong>${fmtMoney(c.amount, state.settings.currencyES)}</strong> (${c.pct}%)</span>
-                                </div>
-                                <div style="height:8px;width:100%;background:#f1f5f9;border-radius:4px;overflow:hidden">
-                                    <div style="height:100%;width:${c.pct}%;background:var(--navy);border-radius:4px"></div>
-                                </div>
-                            </div>
-                        `).join('')}
-                    </div>
-                `}
-            </div>
-        </div>
-
-        <!-- TABELA DE TRANSAÇÕES DO MÊS -->
         <div class="card" style="padding:20px">
-            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📅 Extrato do Mês (${m.txs.length})</h3>
-            ${m.txs.length === 0 ? `<div class="empty-state"><p>Nenhum lançamento encontrado para ${state.selectedMonth}.</p></div>` : `
+            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📅 Lançamentos do Mês (${m.txs.length})</h3>
+            ${m.txs.length === 0 ? `<div class="empty-state"><p>Nenhum lançamento encontrado para este mês.</p></div>` : `
             <div class="table-container">
                 <table class="data-table">
-                    <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
+                    <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
                     <tbody>${m.txs.map(t => renderTransactionRow(t)).join('')}</tbody>
                 </table>
             </div>`}
@@ -454,17 +440,13 @@ const App = (() => {
     const renderTransactionRow = (t) => {
         const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
         const isBR = t.country === 'BR';
-        let badgeColor = t.type === 'income' ? 'badge-success' : (t.type === 'investment' ? 'badge-info' : 'badge-danger');
-        let typeLabel = t.type === 'income' ? 'Entrada' : (t.type === 'investment' ? 'Aporte/Invest' : 'Saída');
-
         return `<tr>
             <td style="white-space:nowrap">${fmtDate(t.date)}</td>
-            <td><span class="badge ${badgeColor}">${typeLabel}</span></td>
             <td><span class="category-tag">${cat.icon} ${cat.name}</span></td>
             <td>${t.description || '-'}</td>
             <td><span class="badge badge-info">👤 ${t.assignedTo || 'Casal'}</span></td>
             <td><span class="badge ${isBR ? 'badge-info' : 'badge-warning'}">${isBR ? '🇧🇷 Brasil' : '🇪🇸 Espanha'}</span></td>
-            <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : (t.type === 'investment' ? '#0284c7' : 'var(--danger)')}">${fmtMoney(t.amount, isBR ? state.settings.currencyBR : state.settings.currencyES)}</td>
+            <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, isBR ? state.settings.currencyBR : state.settings.currencyES)}</td>
             <td style="text-align:right;white-space:nowrap">
                 <button onclick="App.showEditTransactionModal('${t.id}')" style="background:#e0f2fe;color:#0369a1;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600;margin-right:6px">✏️</button>
                 <button onclick="App.deleteTransaction('${t.id}')" style="background:#fee2e2;color:#b91c1c;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600">🗑️</button>
@@ -472,382 +454,294 @@ const App = (() => {
         </tr>`;
     };
 
-    const renderTransactions = () => `<div style="margin-bottom:24px"><h2 style="margin:0;font-size:22px;color:var(--navy)">Todos os Lançamentos</h2></div><div class="card" style="padding:20px"><div id="transactionsTable">${renderTransactionsTable()}</div></div>`;
+    const renderTransactions = () => {
+        return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+            <div>
+                <h2 style="margin:0;font-size:22px;color:var(--navy)">Lançamentos</h2>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Histórico completo</p>
+            </div>
+            <button class="btn-primary" onclick="App.showAddTransactionModal()">+ Novo Lançamento</button>
+        </div>
+        <div class="card" style="padding:20px">
+            <div id="transactionsTable">${renderTransactionsTable()}</div>
+        </div>`;
+    };
 
     const renderTransactionsTable = () => {
         const txs = state.transactions.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
         if (txs.length === 0) return `<div class="empty-state"><p>Nenhum lançamento cadastrado.</p></div>`;
-        return `<div class="table-container"><table class="data-table"><thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead><tbody>${txs.map(t => renderTransactionRow(t)).join('')}</tbody></table></div>`;
-    };
-
-    // ==========================================
-    // RELATÓRIOS COMPLETOS
-    // ==========================================
-    const renderReports = () => {
-        const today = new Date();
-        const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-        const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
-
-        return `
-        <div style="margin-bottom:24px">
-            <h2 style="margin:0;font-size:22px;color:var(--navy)">📈 Relatórios & Análise Financeira</h2>
-            <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Filtre seus gastos por período, país e categoria</p>
-        </div>
-
-        <div class="card" style="padding:20px;margin-bottom:24px">
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;align-items:end">
-                <div class="form-group" style="margin:0">
-                    <label class="form-label">Data Início</label>
-                    <input type="date" id="repStartDate" class="input-field" value="${firstDay}">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label class="form-label">Data Fim</label>
-                    <input type="date" id="repEndDate" class="input-field" value="${lastDay}">
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label class="form-label">País</label>
-                    <select id="repCountry" class="input-field">
-                        <option value="ALL">🇪🇸🇧🇷 Todos os Países</option>
-                        <option value="ES">🇪🇸 Espanha (€)</option>
-                        <option value="BR">🇧🇷 Brasil (R$)</option>
-                    </select>
-                </div>
-                <div class="form-group" style="margin:0">
-                    <label class="form-label">Tipo</label>
-                    <select id="repType" class="input-field">
-                        <option value="ALL">Todos os Tipos</option>
-                        <option value="expense">🔴 Despesas</option>
-                        <option value="income">🟢 Entradas</option>
-                        <option value="investment">🔵 Investimentos</option>
-                    </select>
-                </div>
-                <div>
-                    <button class="btn-primary" style="width:100%" onclick="App.filterReports()">Filtrar</button>
-                </div>
-            </div>
-        </div>
-
-        <div id="reportResultContainer">
-            ${generateReportData(firstDay, lastDay, 'ALL', 'ALL')}
+        return `<div class="table-container">
+            <table class="data-table">
+                <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
+                <tbody>${txs.map(t => renderTransactionRow(t)).join('')}</tbody>
+            </table>
         </div>`;
     };
 
-    const filterReports = () => {
-        const start = el('repStartDate')?.value;
-        const end = el('repEndDate')?.value;
-        const country = el('repCountry')?.value || 'ALL';
-        const type = el('repType')?.value || 'ALL';
-        const container = el('reportResultContainer');
-        if (container) container.innerHTML = generateReportData(start, end, country, type);
+    const renderReports = () => {
+        const ym = state.selectedMonth; // 'YYYY-MM'
+        const parts = ym.split('-');
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10);
+        
+        const firstDay = `${ym}-01`;
+        const lastDayNum = new Date(year, month, 0).getDate();
+        const lastDay = `${ym}-${String(lastDayNum).padStart(2, '0')}`;
+
+        return `<div class="no-print" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+            <div>
+                <h2 style="margin:0;font-size:22px;color:var(--navy)">Relatórios & Exportação</h2>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Selecione o período para consulta, impressão ou download em Excel</p>
+            </div>
+            <div style="display:flex;gap:10px">
+                <button class="btn-primary" style="background:#10b981" onclick="App.exportToExcel()">📊 Exportar para Excel (.csv)</button>
+                <button class="btn-primary" style="background:#4b5563" onclick="window.print()">🖨️ Imprimir / PDF</button>
+            </div>
+        </div>
+        <div class="card no-print" style="padding:20px;margin-bottom:24px">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;align-items:end">
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">Data Inicial</label>
+                    <input type="date" id="reportStartDate" class="input-field" value="${firstDay}" onchange="App.updateReportView()">
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label class="form-label">Data Final</label>
+                    <input type="date" id="reportEndDate" class="input-field" value="${lastDay}" onchange="App.updateReportView()">
+                </div>
+                <div>
+                    <button class="btn-primary" style="width:100%" onclick="App.updateReportView()">Filtrar Período</button>
+                </div>
+            </div>
+        </div>
+        <div id="reportContainer">${generateReportHTML(firstDay, lastDay)}</div>`;
     };
 
-    const generateReportData = (start, end, country, type) => {
-        let filtered = state.transactions.filter(t => {
-            if (start && t.date < start) return false;
-            if (end && t.date > end) return false;
-            if (country !== 'ALL' && t.country !== country) return false;
-            if (type !== 'ALL' && t.type !== type) return false;
-            return true;
-        });
+    const updateReportView = () => {
+        const start = el('reportStartDate')?.value;
+        const end = el('reportEndDate')?.value;
+        const container = el('reportContainer');
+        if (container) container.innerHTML = generateReportHTML(start, end);
+    };
 
-        const totalIncome = filtered.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
-        const totalExpense = filtered.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0);
-        const totalInvest = filtered.filter(t => t.type === 'investment').reduce((s, t) => s + Number(t.amount || 0), 0);
-        const net = totalIncome - totalExpense - totalInvest;
+    const generateReportHTML = (start, end) => {
+        const txs = filterTransactionsByRange(start, end);
+        const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const balance = income - expense;
 
-        // Distribuição por categoria
-        const catMap = {};
-        filtered.forEach(t => {
-            const cid = t.categoryId || 'cat_outros_es';
-            if (!catMap[cid]) catMap[cid] = { total: 0, count: 0, type: t.type };
-            catMap[cid].total += Number(t.amount || 0);
-            catMap[cid].count += 1;
-        });
-
-        const curr = country === 'BR' ? state.settings.currencyBR : state.settings.currencyES;
-
-        return `
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
-            <div class="card stat-card"><div class="stat-label">Total Entradas</div><div class="stat-value emerald-text">${fmtMoney(totalIncome, curr)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Total Saídas</div><div class="stat-value danger-text">${fmtMoney(totalExpense, curr)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Total Investido</div><div class="stat-value" style="color:#0284c7">${fmtMoney(totalInvest, curr)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Resultado Líquido</div><div class="stat-value ${net >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(net, curr)}</div></div>
-        </div>
-
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-            <h3 style="margin:0;color:var(--navy)">📊 Detalhamento por Categorias</h3>
-            <button class="btn-primary" style="padding:8px 16px;font-size:12px" onclick="App.exportCSV()">📥 Exportar CSV</button>
-        </div>
-
-        <div class="card" style="padding:20px;margin-bottom:24px">
-            ${Object.keys(catMap).length === 0 ? '<div class="empty-state"><p>Nenhum lançamento no período selecionado.</p></div>' : `
+        return `<div class="card" style="padding:24px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #eee;padding-bottom:12px">
+                <div>
+                    <h3 style="margin:0;color:var(--navy)">FinFam - Extrato Financeiro</h3>
+                    <p style="margin:4px 0 0;font-size:13px;color:var(--text-light)">Período: <strong>${fmtDate(start)}</strong> até <strong>${fmtDate(end)}</strong></p>
+                </div>
+                <div style="text-align:right">
+                    <div style="font-size:12px;color:var(--text-light)">Total de Lançamentos</div>
+                    <div style="font-weight:700;font-size:18px;color:var(--navy)">${txs.length}</div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
+                <div style="background:#f8fafc;padding:12px;border-radius:8px"><span style="font-size:12px;color:var(--text-light)">Total Receitas</span><div style="font-size:18px;font-weight:700" class="emerald-text">${fmtMoney(income, state.settings.currencyES)}</div></div>
+                <div style="background:#f8fafc;padding:12px;border-radius:8px"><span style="font-size:12px;color:var(--text-light)">Total Despesas</span><div style="font-size:18px;font-weight:700" class="danger-text">${fmtMoney(expense, state.settings.currencyES)}</div></div>
+                <div style="background:#f8fafc;padding:12px;border-radius:8px"><span style="font-size:12px;color:var(--text-light)">Resultado Líquido</span><div style="font-size:18px;font-weight:700" class="${balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(balance, state.settings.currencyES)}</div></div>
+            </div>
+            ${txs.length === 0 ? '<p style="color:var(--text-light)">Nenhum registro encontrado no período selecionado.</p>' : `
             <div class="table-container">
                 <table class="data-table">
-                    <thead><tr><th>Categoria</th><th>Qtd. Lançamentos</th><th>Tipo</th><th>Total Acumulado</th></tr></thead>
-                    <tbody>
-                        ${Object.keys(catMap).map(cid => {
-                            const c = state.categories.find(cat => cat.id === cid) || { name: 'Outros', icon: '📋' };
-                            const item = catMap[cid];
-                            return `<tr>
-                                <td><span class="category-tag">${c.icon} ${c.name}</span></td>
-                                <td>${item.count}</td>
-                                <td><span class="badge ${item.type === 'income' ? 'badge-success' : (item.type === 'investment' ? 'badge-info' : 'badge-danger')}">${item.type}</span></td>
-                                <td style="font-weight:600">${fmtMoney(item.total, curr)}</td>
-                            </tr>`;
-                        }).join('')}
-                    </tbody>
+                    <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th></tr></thead>
+                    <tbody>${txs.map(t => {
+                        const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
+                        const isBR = t.country === 'BR';
+                        return `<tr>
+                            <td>${fmtDate(t.date)}</td>
+                            <td><span class="badge ${t.type === 'income' ? 'badge-success' : 'badge-danger'}">${t.type === 'income' ? 'Entrada' : 'Saída'}</span></td>
+                            <td>${cat.icon} ${cat.name}</td>
+                            <td>${t.description || '-'}</td>
+                            <td>${t.assignedTo || 'Casal'}</td>
+                            <td>${isBR ? 'Brasil' : 'Espanha'}</td>
+                            <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, isBR ? state.settings.currencyBR : state.settings.currencyES)}</td>
+                        </tr>`;
+                    }).join('')}</tbody>
                 </table>
             </div>`}
         </div>`;
     };
 
-    const exportCSV = () => {
-        if (state.transactions.length === 0) { showToast('Nenhum dado para exportar.', 'error'); return; }
-        let csv = 'Data,Tipo,Categoria,Descricao,Responsavel,Pais,Valor\n';
-        state.transactions.forEach(t => {
-            const cat = state.categories.find(c => c.id === t.categoryId)?.name || '';
-            csv += `"${t.date}","${t.type}","${cat}","${t.description || ''}","${t.assignedTo || ''}","${t.country}","${t.amount}"\n`;
+    const exportToExcel = () => {
+        const start = el('reportStartDate')?.value;
+        const end = el('reportEndDate')?.value;
+        const txs = filterTransactionsByRange(start, end);
+
+        if (txs.length === 0) {
+            showToast('Nenhum dado para exportar no período.', 'error');
+            return;
+        }
+
+        let csv = '\uFEFF'; // BOM UTF-8
+        csv += 'Data;Tipo;Categoria;Descrição;Responsável;País;Valor\n';
+
+        txs.forEach(t => {
+            const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral' };
+            const isBR = t.country === 'BR';
+            const val = Number(t.amount || 0).toFixed(2).replace('.', ',');
+            const desc = (t.description || '').replace(/;/g, ',');
+            csv += `${fmtDate(t.date)};${t.type === 'income' ? 'Entrada' : 'Saída'};${cat.name};"${desc}";${t.assignedTo || 'Casal'};${isBR ? 'Brasil' : 'Espanha'};${val}\n`;
         });
+
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
-        link.setAttribute('download', `FinFam_Export_${new Date().toISOString().slice(0, 10)}.csv`);
+        link.setAttribute('download', `FinFam_Relatorio_${start}_a_${end}.csv`);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
-        showToast('CSV exportado com sucesso!');
+        showToast('Relatório Excel (.csv) gerado!');
     };
 
-    // ==========================================
-    // CONFIGURAÇÕES COMPLETAS
-    // ==========================================
-    const renderSettings = () => `
-    <div style="margin-bottom:24px">
-        <h2 style="margin:0;font-size:22px;color:var(--navy)">⚙️ Configurações & Preferências</h2>
-        <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Gerencie sincronização, categorias e dados do sistema</p>
-    </div>
-
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-bottom:24px">
-        
-        <!-- CARD INTEGRACAO GOOGLE DRIVE -->
-        <div class="card" style="padding:20px">
-            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">☁️ Integração Google Drive API</h3>
-            
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;padding:8px 12px;background:#f8fafc;border-radius:8px">
-                <div id="connStatusDot" style="width:10px;height:10px;border-radius:50%;background:#f59e0b"></div>
-                <span id="connStatusText" style="font-size:12px;font-weight:600;color:var(--text)">Aguardando verificação...</span>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Google Apps Script URL</label>
-                <input type="text" id="settingScriptUrl" class="input-field" value="${state.settings.googleScriptUrl || ''}" placeholder="https://script.google.com/macros/s/.../exec">
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Chave / Token de Segurança API</label>
-                <input type="text" id="settingApiToken" class="input-field" value="${state.settings.apiToken || DEFAULT_TOKEN}">
-            </div>
-
-            <div style="display:flex;gap:10px">
-                <button class="btn-primary" style="flex:1" onclick="App.saveSettings()">Salvar Configurações</button>
-                <button class="btn-primary" style="background:#0284c7" onclick="App.syncFromDrive()">🔄 Forçar Sync Drive</button>
-            </div>
+    const renderSettings = () => {
+        return `<div style="margin-bottom:24px">
+            <h2 style="margin:0;font-size:22px;color:var(--navy)">Configurações</h2>
+            <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Conexão com Google Drive e preferências do aplicativo</p>
         </div>
-
-        <!-- CARD GERENCIAMENTO DE CATEGORIAS -->
-        <div class="card" style="padding:20px">
-            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">🏷️ Gestão de Categorias (${state.categories.length})</h3>
-            
-            <form onsubmit="event.preventDefault(); App.addCategory();" style="margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                <input type="text" id="newCatIcon" class="input-field" placeholder="Ícone (ex: 🛒)" required style="text-align:center">
-                <input type="text" id="newCatName" class="input-field" placeholder="Nome da Categoria" required>
-                <select id="newCatType" class="input-field">
-                    <option value="expense">🔴 Despesa</option>
-                    <option value="income">🟢 Entrada</option>
-                    <option value="investment">🔵 Investimento</option>
-                </select>
-                <select id="newCatCountry" class="input-field">
-                    <option value="ES">🇪🇸 Espanha</option>
-                    <option value="BR">🇧🇷 Brasil</option>
-                </select>
-                <button type="submit" class="btn-primary" style="grid-column:span 2;padding:8px">+ Adicionar Categoria</button>
+        <div class="card" style="padding:24px;margin-bottom:24px">
+            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">☁️ Google Drive API & Banco de Dados</h3>
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;padding:12px;background:#f8fafc;border-radius:8px">
+                <span id="connStatusDot" style="width:12px;height:12px;border-radius:50%;background:#f59e0b;display:inline-block"></span>
+                <span id="connStatusText" style="font-weight:600;font-size:14px;color:var(--navy)">Aguardando verificação...</span>
+                <button onclick="App.checkConnection()" style="margin-left:auto;background:none;border:1px solid #cbd5e1;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:12px">🔄 Testar Conexão</button>
+            </div>
+            <form onsubmit="event.preventDefault(); App.saveSettings();">
+                <div class="form-group">
+                    <label class="form-label">URL do Google Apps Script (Web App)</label>
+                    <input type="url" id="cfgUrl" class="input-field" placeholder="https://script.google.com/macros/s/.../exec" value="${state.settings.googleScriptUrl || ''}">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Token de Segurança</label>
+                    <input type="text" id="cfgToken" class="input-field" value="${state.settings.apiToken || DEFAULT_TOKEN}">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                    <div class="form-group"><label class="form-label">Moeda Espanha</label><input type="text" id="cfgCurrES" class="input-field" value="${state.settings.currencyES || '€'}"></div>
+                    <div class="form-group"><label class="form-label">Moeda Brasil</label><input type="text" id="cfgCurrBR" class="input-field" value="${state.settings.currencyBR || 'R$'}"></div>
+                </div>
+                <button type="submit" class="btn-primary" style="padding:12px 24px">Salvar Configurações</button>
             </form>
-
-            <div style="max-height:200px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;padding:8px">
-                ${state.categories.map(c => `
-                    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:12px">
-                        <span>${c.icon} <strong>${c.name}</strong> (${c.country})</span>
-                        <button onclick="App.deleteCategory('${c.id}')" style="background:none;border:none;color:#ef4444;cursor:pointer">🗑️</button>
-                    </div>
-                `).join('')}
+        </div>
+        <div class="card" style="padding:24px">
+            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">🔄 Sincronização Manual</h3>
+            <div style="display:flex;gap:12px;flex-wrap:wrap">
+                <button class="btn-primary" style="background:#0284c7" onclick="App.syncFromDrive()">⬇️ Baixar do Google Drive</button>
+                <button class="btn-primary" style="background:#059669" onclick="App.syncToDrive()">⬆️ Enviar para o Google Drive</button>
             </div>
-        </div>
-
-    </div>
-
-    <!-- CARD BACKUP E DADOS -->
-    <div class="card" style="padding:20px">
-        <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">💾 Backup e Dados Locais</h3>
-        <p style="font-size:13px;color:var(--text-light);margin-bottom:16px">Baixe uma cópia de segurança em formato JSON ou restaure seus dados.</p>
-        
-        <div style="display:flex;gap:12px;flex-wrap:wrap">
-            <button class="btn-primary" style="background:#059669" onclick="App.exportBackup()">📥 Exportar Backup JSON</button>
-            <input type="file" id="importFileInput" style="display:none" onchange="App.importBackup(event)" accept=".json">
-            <button class="btn-primary" style="background:#0284c7" onclick="document.getElementById('importFileInput').click()">📤 Importar Backup JSON</button>
-            <button class="btn-primary" style="background:#dc2626" onclick="App.resetAllData()">⚠️ Zerar Todos os Dados</button>
-        </div>
-    </div>`;
+        </div>`;
+    };
 
     const saveSettings = () => {
-        state.settings.googleScriptUrl = el('settingScriptUrl')?.value.trim();
-        state.settings.apiToken = el('settingApiToken')?.value.trim() || DEFAULT_TOKEN;
+        state.settings.googleScriptUrl = el('cfgUrl')?.value.trim() || '';
+        state.settings.apiToken = el('cfgToken')?.value.trim() || DEFAULT_TOKEN;
+        state.settings.currencyES = el('cfgCurrES')?.value.trim() || '€';
+        state.settings.currencyBR = el('cfgCurrBR')?.value.trim() || 'R$';
         saveState();
         showToast('Configurações salvas!');
         checkConnection();
     };
 
-    const addCategory = () => {
-        const icon = el('newCatIcon')?.value.trim() || '📋';
-        const name = el('newCatName')?.value.trim();
-        const type = el('newCatType')?.value;
-        const country = el('newCatCountry')?.value;
-
-        if (!name) { showToast('Informe o nome da categoria.', 'error'); return; }
-
-        state.categories.push({ id: 'cat_' + generateId(), name, icon, type, country });
-        saveState();
-        renderCurrentPage();
-        showToast('Categoria adicionada!');
-        syncToDrive();
+    const showAddTransactionModal = () => {
+        showTransactionModal();
     };
 
-    const deleteCategory = (id) => {
-        if (confirm('Deseja excluir esta categoria?')) {
-            state.categories = state.categories.filter(c => c.id !== id);
-            saveState();
-            renderCurrentPage();
-            showToast('Categoria excluída.');
-            syncToDrive();
-        }
+    const showEditTransactionModal = (id) => {
+        const tx = state.transactions.find(t => t.id === id);
+        if (tx) showTransactionModal(tx);
     };
-
-    const exportBackup = () => {
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state, null, 2));
-        const downloadAnchor = document.createElement('a');
-        downloadAnchor.setAttribute("href", dataStr);
-        downloadAnchor.setAttribute("download", `FinFam_Backup_${new Date().toISOString().slice(0, 10)}.json`);
-        document.body.appendChild(downloadAnchor);
-        downloadAnchor.click();
-        downloadAnchor.remove();
-        showToast('Backup exportado com sucesso!');
-    };
-
-    const importBackup = (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const parsed = JSON.parse(e.target.result);
-                if (parsed.transactions && parsed.categories) {
-                    state = parsed;
-                    saveState();
-                    renderApp();
-                    showToast('Backup restaurado com sucesso!');
-                } else {
-                    showToast('Formato de arquivo inválido.', 'error');
-                }
-            } catch (err) {
-                showToast('Erro ao ler arquivo de backup.', 'error');
-            }
-        };
-        reader.readAsText(file);
-    };
-
-    const resetAllData = () => {
-        if (confirm('ATENÇÃO: Deseja realmente zerar todos os dados? Esta ação é irreversível.')) {
-            resetState();
-            renderApp();
-            showToast('Dados reiniciados com sucesso.', 'error');
-        }
-    };
-
-    const showAddTransactionModal = () => showTransactionModal();
-    const showEditTransactionModal = (id) => { const tx = state.transactions.find(t => t.id === id); if (tx) showTransactionModal(tx); };
 
     const showTransactionModal = (tx = null) => {
         const isEdit = !!tx;
-        const today = new Date().toISOString().split('T')[0];
-        const html = `
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-                <h3 style="margin:0;color:var(--navy)">${isEdit ? 'Editar Lançamento' : 'Novo Lançamento'}</h3>
-                <button onclick="App.closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">✕</button>
-            </div>
+        const today = new Date().toISOString().slice(0, 10);
+
+        const categoriesOptions = state.categories.map(c => 
+            `<option value="${c.id}" ${tx && tx.categoryId === c.id ? 'selected' : ''}>${c.icon} ${c.name} (${c.country})</option>`
+        ).join('');
+
+        el('modalContent').innerHTML = `
+            <h3 style="margin:0 0 16px;color:var(--navy)">${isEdit ? '✏️ Editar Lançamento' : '➕ Novo Lançamento'}</h3>
             <form onsubmit="event.preventDefault(); App.saveTransaction('${tx ? tx.id : ''}');">
                 <div class="form-group">
-                    <label class="form-label">Tipo de Lançamento</label>
-                    <select id="modalTxType" class="input-field">
-                        <option value="expense" ${tx?.type === 'expense' ? 'selected' : ''}>🔴 Saída / Despesa</option>
-                        <option value="income" ${tx?.type === 'income' ? 'selected' : ''}>🟢 Entrada / Receita</option>
-                        <option value="investment" ${tx?.type === 'investment' ? 'selected' : ''}>🔵 Investimento / Patrimônio</option>
+                    <label class="form-label">Tipo</label>
+                    <select id="txType" class="input-field">
+                        <option value="expense" ${tx && tx.type === 'expense' ? 'selected' : ''}>Despesa (Saída)</option>
+                        <option value="income" ${tx && tx.type === 'income' ? 'selected' : ''}>Receita (Entrada)</option>
                     </select>
                 </div>
-                <div class="form-group"><label class="form-label">Data</label><input type="date" id="modalTxDate" class="input-field" value="${tx?.date || today}" required></div>
+                <div class="form-group">
+                    <label class="form-label">Data</label>
+                    <input type="date" id="txDate" class="input-field" value="${tx ? tx.date : today}" required>
+                </div>
                 <div class="form-group">
                     <label class="form-label">Categoria</label>
-                    <select id="modalTxCategory" class="input-field">
-                        ${state.categories.map(c => `<option value="${c.id}" ${tx?.categoryId === c.id ? 'selected' : ''}>${c.icon} ${c.name}</option>`).join('')}
-                    </select>
+                    <select id="txCategory" class="input-field">${categoriesOptions}</select>
                 </div>
-                <div class="form-group"><label class="form-label">Descrição</label><input type="text" id="modalTxDesc" class="input-field" value="${tx?.description || ''}"></div>
+                <div class="form-group">
+                    <label class="form-label">Descrição</label>
+                    <input type="text" id="txDesc" class="input-field" placeholder="Ex: Mercado Mercadona" value="${tx ? tx.description : ''}">
+                </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-                    <div class="form-group"><label class="form-label">Responsável</label><input type="text" id="modalTxAssigned" class="input-field" value="${tx?.assignedTo || 'Casal'}"></div>
+                    <div class="form-group">
+                        <label class="form-label">Responsável</label>
+                        <input type="text" id="txAssigned" class="input-field" value="${tx ? tx.assignedTo : 'Casal'}">
+                    </div>
                     <div class="form-group">
                         <label class="form-label">País</label>
-                        <select id="modalTxCountry" class="input-field">
-                            <option value="ES" ${tx?.country === 'ES' ? 'selected' : ''}>🇪🇸 Espanha</option>
-                            <option value="BR" ${tx?.country === 'BR' ? 'selected' : ''}>🇧🇷 Brasil</option>
+                        <select id="txCountry" class="input-field">
+                            <option value="ES" ${tx && tx.country === 'ES' ? 'selected' : ''}>🇪🇸 Espanha</option>
+                            <option value="BR" ${tx && tx.country === 'BR' ? 'selected' : ''}>🇧🇷 Brasil</option>
                         </select>
                     </div>
                 </div>
-                <div class="form-group"><label class="form-label">Valor</label><input type="number" step="0.01" id="modalTxAmount" class="input-field" value="${tx?.amount || ''}" required></div>
-                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
-                    <button type="button" class="btn-primary" style="background:#9ca3af" onclick="App.closeModal()">Cancelar</button>
-                    <button type="submit" class="btn-primary">${isEdit ? 'Atualizar' : 'Salvar'}</button>
+                <div class="form-group">
+                    <label class="form-label">Valor</label>
+                    <input type="number" step="0.01" id="txAmount" class="input-field" placeholder="0.00" value="${tx ? tx.amount : ''}" required>
                 </div>
-            </form>`;
-        const overlay = el('modalOverlay');
-        const content = el('modalContent');
-        if (overlay && content) { content.innerHTML = html; overlay.style.display = 'flex'; }
+                <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:20px">
+                    <button type="button" class="btn-primary" style="background:#94a3b8" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn-primary">${isEdit ? 'Salvar Alterações' : 'Adicionar'}</button>
+                </div>
+            </form>
+        `;
+        el('modalOverlay').classList.add('show');
+    };
+
+    const closeModal = () => {
+        el('modalOverlay').classList.remove('show');
     };
 
     const saveTransaction = (id) => {
-        const type = el('modalTxType')?.value;
-        const date = el('modalTxDate')?.value;
-        const categoryId = el('modalTxCategory')?.value;
-        const description = el('modalTxDesc')?.value.trim();
-        const assignedTo = el('modalTxAssigned')?.value.trim();
-        const country = el('modalTxCountry')?.value;
-        const amount = parseFloat(el('modalTxAmount')?.value) || 0;
-
-        if (!date || amount <= 0) { showToast('Informe uma data e um valor válido.', 'error'); return; }
+        const type = el('txType').value;
+        const date = el('txDate').value;
+        const categoryId = el('txCategory').value;
+        const description = el('txDesc').value.trim();
+        const assignedTo = el('txAssigned').value.trim() || 'Casal';
+        const country = el('txCountry').value;
+        const amount = parseFloat(el('txAmount').value) || 0;
 
         if (id) {
             const index = state.transactions.findIndex(t => t.id === id);
-            if (index !== -1) state.transactions[index] = { id, date, type, categoryId, description, assignedTo, country, amount };
+            if (index !== -1) {
+                state.transactions[index] = { id, date, type, categoryId, description, assignedTo, country, amount };
+            }
         } else {
-            state.transactions.push({ id: generateId(), date, type, categoryId, description, assignedTo, country, amount });
+            const newTx = { id: generateId(), date, type, categoryId, description, assignedTo, country, amount };
+            state.transactions.push(newTx);
         }
 
         saveState();
         closeModal();
         renderApp();
-        showToast(id ? 'Lançamento atualizado!' : 'Lançamento adicionado!');
+        showToast('Lançamento salvo!');
         syncToDrive();
     };
 
     const deleteTransaction = (id) => {
-        if (confirm('Deseja excluir este lançamento?')) {
+        if (confirm('Deseja realmente excluir este lançamento?')) {
             state.transactions = state.transactions.filter(t => t.id !== id);
             saveState();
             renderApp();
@@ -856,20 +750,25 @@ const App = (() => {
         }
     };
 
-    const closeModal = () => { const overlay = el('modalOverlay'); if (overlay) overlay.style.display = 'none'; };
-
     const init = () => {
         initState();
-        if (!isSetup()) renderSetup();
-        else if (!isLoggedIn()) renderLogin();
-        else { renderApp(); syncFromDrive(true); }
+        if (!isSetup()) {
+            renderSetup();
+        } else if (!isLoggedIn()) {
+            renderLogin();
+        } else {
+            renderApp();
+            syncFromDrive(true);
+        }
     };
 
     return {
-        init, doSetup, doLogin, logout, nav, togglePrivacy, changeSelectedMonth, saveSettings,
-        syncFromDrive, filterReports, exportCSV, addCategory, deleteCategory, exportBackup, importBackup, resetAllData,
-        showAddTransactionModal, showEditTransactionModal, saveTransaction, deleteTransaction, closeModal
+        init, doSetup, doLogin, logout, nav, togglePrivacy,
+        changeSelectedMonth, updateReportView, exportToExcel,
+        checkConnection, saveSettings, syncFromDrive, syncToDrive,
+        showAddTransactionModal, showEditTransactionModal, closeModal, saveTransaction, deleteTransaction,
+        resetAllData
     };
 })();
 
-document.addEventListener('DOMContentLoaded', () => App.init());
+document.addEventListener('DOMContentLoaded', App.init);
