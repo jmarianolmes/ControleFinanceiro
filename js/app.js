@@ -78,28 +78,41 @@ const App = (() => {
     const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
     const now = () => new Date().toISOString();
 
-    // --- CATEGORIAS PADRÃO (VALENCIA & BRASIL) ---
+    // --- LISTA EXPANDIDA DE CATEGORIAS (ESPANHA & BRASIL) ---
     const defaultCategories = [
-        // Receitas
-        { id: 'cat_aluguel_br', name: 'Receita Aluguel (BR)', type: 'income', country: 'BR', icon: '🏠' },
-        { id: 'cat_outra_receita', name: 'Outras Receitas', type: 'income', country: 'ES', icon: '💰' },
-        
-        // Despesas Brasil
-        { id: 'cat_cc_br', name: 'Cartão de Crédito BR', type: 'expense', country: 'BR', icon: '💳' },
-        { id: 'cat_outros_br', name: 'Compromissos BR', type: 'expense', country: 'BR', icon: '🇧🇷' },
+        // Receitas Espanha
+        { id: 'cat_salario_es', name: 'Salário / Emprego (ES)', type: 'income', country: 'ES', icon: '💼' },
+        { id: 'cat_freelance_es', name: 'Trabalho Freelance / Extras (ES)', type: 'income', country: 'ES', icon: '💻' },
+        { id: 'cat_outras_entradas_es', name: 'Outras Receitas (ES)', type: 'income', country: 'ES', icon: '💶' },
 
-        // Despesas Espanha (València)
+        // Receitas Brasil
+        { id: 'cat_aluguel_br', name: 'Receita Aluguel (BR)', type: 'income', country: 'BR', icon: '🏠' },
+        { id: 'cat_outras_entradas_br', name: 'Outras Receitas (BR)', type: 'income', country: 'BR', icon: '🇧🇷' },
+        
+        // Despesas Espanha (Principais & Detalhadas)
+        { id: 'cat_aluguel_es', name: 'Aluguel de Moradia (ES)', type: 'expense', country: 'ES', icon: '🔑' },
+        { id: 'cat_hipoteca_es', name: 'Hipoteca / Financiamento (ES)', type: 'expense', country: 'ES', icon: '🏛️' },
+        { id: 'cat_comunidad', name: 'Comunidad / Condomínio', type: 'expense', country: 'ES', icon: '🏢' },
         { id: 'cat_agua', name: 'Água', type: 'expense', country: 'ES', icon: '💧' },
-        { id: 'cat_luz', name: 'Energia / Eletricidade', type: 'expense', country: 'ES', icon: '⚡' },
+        { id: 'cat_luz', name: 'Energia / Luz', type: 'expense', country: 'ES', icon: '⚡' },
+        { id: 'cat_gas', name: 'Gás', type: 'expense', country: 'ES', icon: '🔥' },
         { id: 'cat_mercado', name: 'Mercado / Alimentação', type: 'expense', country: 'ES', icon: '🛒' },
-        { id: 'cat_escola', name: 'Escola das Crianças (10 e 7a)', type: 'expense', country: 'ES', icon: '🎒' },
-        { id: 'cat_metro', name: 'Metrô / Transporte público', type: 'expense', country: 'ES', icon: '🚇' },
-        { id: 'cat_saude', name: 'Seguro Saúde Familiar', type: 'expense', country: 'ES', icon: '🏥' },
-        { id: 'cat_telecom', name: 'Internet + 2 Celulares', type: 'expense', country: 'ES', icon: '📱' },
+        { id: 'cat_escola', name: 'Escola / Crianças (10 e 7a)', type: 'expense', country: 'ES', icon: '🎒' },
+        { id: 'cat_metro', name: 'Metrô / Transporte Público', type: 'expense', country: 'ES', icon: '🚇' },
+        { id: 'cat_veiculo', name: 'Veículo / Manutenção / Documentos', type: 'expense', country: 'ES', icon: '🚗' },
+        { id: 'cat_combustivel', name: 'Combustível', type: 'expense', country: 'ES', icon: '⛽' },
+        { id: 'cat_seguros', name: 'Seguros (Saúde, Carro, Casa)', type: 'expense', country: 'ES', icon: '🛡️' },
+        { id: 'cat_impostos', name: 'Impostos / Tasas / IRPF', type: 'expense', country: 'ES', icon: '🧾' },
+        { id: 'cat_telecom', name: 'Internet + Celulares', type: 'expense', country: 'ES', icon: '📱' },
         { id: 'cat_utensilios', name: 'Utensílios / Início de vida ES', type: 'expense', country: 'ES', icon: '📦' },
         { id: 'cat_trabalho', name: 'Materiais de Trabalho', type: 'expense', country: 'ES', icon: '💻' },
         { id: 'cat_lazer', name: 'Lazer & Família', type: 'expense', country: 'ES', icon: '🎬' },
-        { id: 'cat_outros_es', name: 'Outros (ES)', type: 'expense', country: 'ES', icon: '📋' }
+        { id: 'cat_outros_es', name: 'Outros (ES)', type: 'expense', country: 'ES', icon: '📋' },
+
+        // Despesas Brasil
+        { id: 'cat_cc_br', name: 'Cartão de Crédito BR', type: 'expense', country: 'BR', icon: '💳' },
+        { id: 'cat_impostos_br', name: 'Impostos / Taxas BR', type: 'expense', country: 'BR', icon: '🧾' },
+        { id: 'cat_outros_br', name: 'Compromissos BR', type: 'expense', country: 'BR', icon: '🇧🇷' }
     ];
 
     // --- PERSISTÊNCIA DE DADOS ---
@@ -108,7 +121,7 @@ const App = (() => {
         if (raw) {
             try {
                 state = JSON.parse(raw);
-                if (!state.categories || state.categories.length === 0) state.categories = [...defaultCategories];
+                state.categories = [...defaultCategories]; // Garante categorias sempre atualizadas
                 if (!state.settings) state.settings = { currencyBR: 'R$', currencyES: '€', monthStartDay: 1 };
             } catch (e) { resetState(); }
         } else { resetState(); }
@@ -173,7 +186,7 @@ const App = (() => {
         return true;
     };
 
-    // --- CÁLCULOS FINANCEIROS ROBUSTOS ---
+    // --- CÁLCULOS FINANCEIROS ---
     const getMonthRange = (year, month) => {
         const start = new Date(year, month - 1, state.settings.monthStartDay || 1);
         const end = new Date(year, month, state.settings.monthStartDay || 1);
@@ -199,17 +212,11 @@ const App = (() => {
 
         const income = txs
             .filter(t => t.type === 'income')
-            .reduce((s, t) => {
-                const amount = Number(t.amount);
-                return s + (Number.isFinite(amount) ? amount : 0);
-            }, 0);
+            .reduce((s, t) => s + (Number.isFinite(Number(t.amount)) ? Number(t.amount) : 0), 0);
 
         const expense = txs
             .filter(t => t.type === 'expense')
-            .reduce((s, t) => {
-                const amount = Number(t.amount);
-                return s + (Number.isFinite(amount) ? amount : 0);
-            }, 0);
+            .reduce((s, t) => s + (Number.isFinite(Number(t.amount)) ? Number(t.amount) : 0), 0);
 
         return {
             income,
@@ -228,15 +235,10 @@ const App = (() => {
                 map[t.categoryId] = {
                     amount: 0,
                     count: 0,
-                    category: state.categories.find(c => c.id === t.categoryId) || {
-                        name: 'Outros',
-                        icon: '📋'
-                    }
+                    category: state.categories.find(c => c.id === t.categoryId) || { name: 'Outros', icon: '📋' }
                 };
             }
-
-            const amount = Number(t.amount);
-            map[t.categoryId].amount += Number.isFinite(amount) ? amount : 0;
+            map[t.categoryId].amount += Number.isFinite(Number(t.amount)) ? Number(t.amount) : 0;
             map[t.categoryId].count++;
         });
 
@@ -286,11 +288,11 @@ const App = (() => {
             saveState();
             setSession(user.id);
             renderApp();
-            showToast('Conta principal criada com sucesso!');
+            showToast('Conta principal criada!');
 
         } catch (err) {
             console.error('Erro em doSetup:', err);
-            showToast('Erro ao criar a conta: ' + (err?.message || 'erro desconhecido'), 'error');
+            showToast('Erro ao criar a conta.', 'error');
         }
     };
 
@@ -323,7 +325,7 @@ const App = (() => {
 
         } catch (err) {
             console.error('Erro em doLogin:', err);
-            showToast('Erro ao entrar: ' + (err?.message || 'erro desconhecido'), 'error');
+            showToast('Erro ao entrar.', 'error');
         }
     };
 
@@ -347,7 +349,7 @@ const App = (() => {
                     <div class="form-group"><label class="form-label">Senha</label><input type="password" id="loginPwd" class="input-field" placeholder="Sua senha"></div>
                     <button class="btn-primary" style="width:100%;padding:14px" onclick="App.doLogin()">Entrar</button>
                     <div style="text-align:center;margin-top:20px;display:flex;flex-direction:column;gap:10px">
-                        <p style="margin:0;font-size:13px;color:var(--text-light)">Acesso restrito ao casal.</p>
+                        <p style="margin:0;font-size:13px;color:var(--text-light)">Acesso exclusivo da família.</p>
                         <button onclick="App.resetAllData()" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;text-decoration:underline">Redefinir Dados / Criar Conta do Zero</button>
                     </div>
                 </div>
@@ -448,16 +450,16 @@ const App = (() => {
             ${recent.length === 0 ? `<div class="empty-state"><div style="font-size:48px;margin-bottom:12px">📝</div><p>Nenhum lançamento registrado ainda.</p></div>` : `
             <div class="table-container">
                 <table class="data-table">
-                    <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>País</th><th>Valor</th><th>Tipo</th></tr></thead>
+                    <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th></tr></thead>
                     <tbody>${recent.map(t => {
                         const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
                         return `<tr>
                             <td>${fmtDate(t.date)}</td>
                             <td><span class="category-tag">${cat.icon} ${cat.name}</span></td>
                             <td>${t.description || '-'}</td>
+                            <td><span class="badge badge-info">👤 ${t.assignedTo || 'Casal'}</span></td>
                             <td><span class="badge ${t.country === 'BR' ? 'badge-info' : 'badge-warning'}">${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</span></td>
                             <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES)}</td>
-                            <td><span class="badge ${t.type === 'income' ? 'badge-success' : 'badge-danger'}">${t.type === 'income' ? 'Entrada' : 'Saída'}</span></td>
                         </tr>`;
                     }).join('')}</tbody>
                 </table>
@@ -531,13 +533,14 @@ const App = (() => {
         }
         return `<div class="table-container">
             <table class="data-table">
-                <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>País</th><th>Valor</th><th>Tipo</th><th>Ações</th></tr></thead>
+                <thead><tr><th>Data</th><th>Categoria</th><th>Descrição / Detalhe</th><th>Responsável</th><th>País</th><th>Valor</th><th>Tipo</th><th>Ações</th></tr></thead>
                 <tbody>${txs.map(t => {
                     const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
                     return `<tr>
                         <td>${fmtDate(t.date)}</td>
                         <td><span class="category-tag">${cat.icon} ${cat.name}</span></td>
                         <td>${t.description || '-'}</td>
+                        <td><span class="badge badge-info">👤 ${t.assignedTo || 'Casal'}</span></td>
                         <td><span class="badge ${t.country === 'BR' ? 'badge-info' : 'badge-warning'}">${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</span></td>
                         <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES)}</td>
                         <td><span class="badge ${t.type === 'income' ? 'badge-success' : 'badge-danger'}">${t.type === 'income' ? 'Entrada' : 'Saída'}</span></td>
@@ -616,7 +619,7 @@ const App = (() => {
         </div>`;
     };
 
-    // --- MODAIS E FORMULÁRIOS (AÇÕES) ---
+    // --- MODAIS E AÇÕES DE LANÇAMENTO ---
     const closeModal = () => {
         const overlay = el('modalOverlay');
         if (overlay) overlay.classList.remove('active');
@@ -636,6 +639,9 @@ const App = (() => {
 
         const defaultType = 'expense';
         const initialCats = state.categories.filter(c => c.type === defaultType);
+
+        // Opções de usuários cadastrados + Casal
+        const userOptions = state.users.map(u => `<option value="${u.name}">${u.name}</option>`).join('');
 
         content.innerHTML = `
             <div class="modal-header">
@@ -661,6 +667,13 @@ const App = (() => {
                     </select>
                 </div>
                 <div class="form-group">
+                    <label class="form-label">Responsável / Quem Realizou</label>
+                    <select id="txAssignedTo" class="input-field">
+                        <option value="Casal / Ambos">👩‍❤️‍👨 Casal / Ambos</option>
+                        ${userOptions}
+                    </select>
+                </div>
+                <div class="form-group">
                     <label class="form-label">País / Moeda</label>
                     <select id="txCountry" class="input-field">
                         <option value="ES">🇪🇸 Espanha (€ Euro)</option>
@@ -672,8 +685,8 @@ const App = (() => {
                     <input type="date" id="txDate" class="input-field" value="${new Date().toISOString().split('T')[0]}" required>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">Descrição / Observação</label>
-                    <input type="text" id="txDesc" class="input-field" placeholder="Ex: Consum Mercado, Seguro Saúde, etc.">
+                    <label class="form-label">Nome / Detalhe do Lançamento</label>
+                    <input type="text" id="txDesc" class="input-field" placeholder="Ex: Aluguel Apto, Seguro Sanitas, Consum Mercado...">
                 </div>
                 <button type="submit" class="btn-primary" style="width:100%;margin-top:10px">Salvar Lançamento</button>
             </form>
@@ -687,6 +700,7 @@ const App = (() => {
         const type = el('txType').value;
         const country = el('txCountry').value;
         const date = el('txDate').value;
+        const assignedTo = el('txAssignedTo').value;
         const description = el('txDesc').value.trim();
 
         if (!amount || amount <= 0) {
@@ -701,6 +715,7 @@ const App = (() => {
             type,
             country,
             date,
+            assignedTo,
             description,
             userId: state.currentUser.id,
             createdAt: now()
@@ -775,7 +790,7 @@ const App = (() => {
         saveState();
         closeModal();
         renderApp();
-        showToast('Familiar cadastrado! Já pode fazer login.');
+        showToast('Familiar cadastrado!');
     };
 
     const nav = (elem) => {
