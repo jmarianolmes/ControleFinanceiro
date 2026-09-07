@@ -13,12 +13,12 @@ const App = (() => {
         sessionExpiry: null,
         privacyMode: false
     };
-    
+
     let charts = {};
     let inactivityTimer = null;
 
     const el = id => document.getElementById(id);
-    
+
     const fmtDate = d => {
         if (!d) return '-';
         const parts = d.split('-');
@@ -96,24 +96,29 @@ const App = (() => {
         { id: 'cat_outros_br', name: 'Compromissos Diversos', type: 'expense', country: 'BR', icon: '🇧🇷' }
     ];
 
-    // --- COMUNICAÇÃO SEGURA COM GOOGLE DRIVE (POST ONLY) ---
+    // --- COMUNICAÇÃO SEGURA COM GOOGLE DRIVE ---
     const syncToDrive = async () => {
         const url = state.settings.googleScriptUrl;
         if (!url) return;
         try {
-            await fetch(url, {
+            const res = await fetch(url, {
                 method: 'POST',
-                mode: 'no-cors',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({
                     action: 'sync',
                     token: state.settings.apiToken || DEFAULT_TOKEN,
                     transactions: state.transactions
                 })
             });
-            showToast('Dados protegidos e salvos no Drive!');
+            const data = await res.json();
+            if (data.status === 'success') {
+                showToast('Dados salvos no Google Drive!');
+            } else {
+                showToast(data.message || 'Erro ao salvar no Drive.', 'error');
+            }
         } catch (e) {
             console.error('Erro de sincronização:', e);
+            showToast('Erro ao comunicar com o Drive.', 'error');
         }
     };
 
@@ -123,7 +128,7 @@ const App = (() => {
         try {
             const res = await fetch(url, {
                 method: 'POST',
-                headers: { 'Content-Type': 'text/plain' },
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                 body: JSON.stringify({
                     action: 'fetch',
                     token: state.settings.apiToken || DEFAULT_TOKEN
@@ -139,6 +144,7 @@ const App = (() => {
                 showToast(data.message, 'error');
             }
         } catch (e) {
+            console.error('Erro ao buscar do Drive:', e);
             showToast('Erro ao consultar o Google Drive.', 'error');
         }
     };
@@ -254,6 +260,15 @@ const App = (() => {
     };
 
     const logout = () => { clearSession(); renderLogin(); };
+
+    const nav = (element) => {
+        document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        element.classList.add('active');
+        const targetPage = element.getAttribute('data-page');
+        const p = el(targetPage);
+        if (p) p.classList.add('active');
+    };
 
     const renderLogin = () => {
         el('app').innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
@@ -405,7 +420,6 @@ const App = (() => {
         </div>`;
     };
 
-    // --- RELATÓRIOS, FILTRO POR PERÍODO, EXPORTAÇÃO EXCEL E IMPRESSÃO ---
     const renderReports = () => {
         const today = new Date();
         const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
@@ -500,7 +514,7 @@ const App = (() => {
             return;
         }
 
-        let csvContent = "\uFEFF"; // UTF-8 BOM para garantir acentos e moedas no Excel
+        let csvContent = "\uFEFF";
         csvContent += "ID;Data;Tipo;Categoria;Descricao;Responsavel;Pais;Valor\n";
 
         txs.forEach(t => {
@@ -539,242 +553,184 @@ const App = (() => {
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:16px">
             <div class="card" style="padding:24px">
                 <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">🔗 Conexão Google Drive</h3>
-                <div class="form-group">
-                    <label class="form-label">URL do Web App (Google Apps Script)</label>
-                    <input type="url" id="googleScriptUrl" class="input-field" value="${state.settings.googleScriptUrl || ''}" placeholder="https://script.google.com/macros/s/.../exec">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Token de Autenticação (Chave de Segurança)</label>
-                    <input type="text" id="apiToken" class="input-field" value="${state.settings.apiToken || DEFAULT_TOKEN}">
-                </div>
-                <button class="btn-primary" onclick="App.saveGoogleSettings()">Salvar Configurações</button>
+                <form onsubmit="event.preventDefault(); App.saveSettings();">
+                    <div class="form-group">
+                        <label class="form-label">URL do Web App (Google Apps Script)</label>
+                        <input type="url" id="googleScriptUrl" class="input-field" value="${state.settings.googleScriptUrl || ''}" placeholder="https://script.google.com/macros/s/.../exec">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Token da API</label>
+                        <input type="text" id="apiToken" class="input-field" value="${state.settings.apiToken || DEFAULT_TOKEN}">
+                    </div>
+                    <button type="submit" class="btn-primary" style="width:100%">Salvar Configurações</button>
+                </form>
             </div>
         </div>`;
     };
 
-    const saveGoogleSettings = () => {
-        state.settings.googleScriptUrl = el('googleScriptUrl').value.trim();
-        state.settings.apiToken = el('apiToken').value.trim();
+    const saveSettings = () => {
+        const url = el('googleScriptUrl')?.value.trim();
+        const token = el('apiToken')?.value.trim();
+        state.settings.googleScriptUrl = url || '';
+        state.settings.apiToken = token || DEFAULT_TOKEN;
         saveState();
         showToast('Configurações salvas!');
-        if (state.settings.googleScriptUrl) syncFromDrive();
-    };
-
-    const closeModal = () => { el('modalOverlay')?.classList.remove('active'); };
-
-    const filterCategoriesByType = (type) => {
-        const select = el('txCategory');
-        if (!select) return;
-        const filtered = state.categories.filter(c => c.type === type);
-        select.innerHTML = filtered.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('');
     };
 
     const showAddTransactionModal = () => {
-        const overlay = el('modalOverlay');
-        const content = el('modalContent');
-        if (!overlay || !content) return;
-
-        const defaultType = 'expense';
-        const initialCats = state.categories.filter(c => c.type === defaultType);
-        const userOptions = state.users.map(u => `<option value="${u.name}">${u.name}</option>`).join('');
-
-        content.innerHTML = `
-            <div class="modal-header">
-                <h3 class="modal-title">Novo Lançamento</h3>
-                <button class="close-btn" onclick="App.closeModal()">&times;</button>
-            </div>
-            <form onsubmit="event.preventDefault(); App.doSaveTransaction();">
-                <div class="form-group">
-                    <label class="form-label">Tipo</label>
-                    <select id="txType" class="input-field" onchange="App.filterCategoriesByType(this.value)">
-                        <option value="expense">Saída / Despesa</option>
-                        <option value="income">Entrada / Receita</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Valor</label>
-                    <input type="number" step="0.01" id="txAmount" class="input-field" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Categoria</label>
-                    <select id="txCategory" class="input-field" required>
-                        ${initialCats.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Responsável</label>
-                    <select id="txAssignedTo" class="input-field">
-                        <option value="Casal / Ambos">👩‍❤️‍👨 Casal / Ambos</option>
-                        ${userOptions}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">País</label>
-                    <select id="txCountry" class="input-field">
-                        <option value="ES">🇪🇸 Espanha (€)</option>
-                        <option value="BR">🇧🇷 Brasil (R$)</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Data</label>
-                    <input type="date" id="txDate" class="input-field" value="${new Date().toISOString().split('T')[0]}" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Descrição</label>
-                    <input type="text" id="txDesc" class="input-field">
-                </div>
-                <button type="submit" class="btn-primary" style="width:100%">Salvar Lançamento</button>
-            </form>
-        `;
-        overlay.classList.add('active');
+        showTransactionModal();
     };
 
     const showEditTransactionModal = (id) => {
-        const tx = state.transactions.find(t => t.id === id);
-        if (!tx) return;
+        const t = state.transactions.find(x => x.id === id);
+        if (t) showTransactionModal(t);
+    };
 
+    const showTransactionModal = (t = null) => {
         const overlay = el('modalOverlay');
         const content = el('modalContent');
         if (!overlay || !content) return;
 
-        const filteredCats = state.categories.filter(c => c.type === (tx.type || 'expense'));
-        const userOptions = state.users.map(u => `<option value="${u.name}" ${tx.assignedTo === u.name ? 'selected' : ''}>${u.name}</option>`).join('');
+        const isEdit = !!t;
+        const today = new Date().toISOString().split('T')[0];
 
         content.innerHTML = `
-            <div class="modal-header">
-                <h3 class="modal-title">Editar Lançamento</h3>
-                <button class="close-btn" onclick="App.closeModal()">&times;</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+                <h3 style="margin:0;color:var(--navy)">${isEdit ? 'Editar Lançamento' : 'Novo Lançamento'}</h3>
+                <button onclick="App.closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer">&times;</button>
             </div>
-            <form onsubmit="event.preventDefault(); App.doUpdateTransaction('${tx.id}');">
+            <form onsubmit="event.preventDefault(); App.saveTransaction('${isEdit ? t.id : ''}');">
                 <div class="form-group">
                     <label class="form-label">Tipo</label>
-                    <select id="txType" class="input-field" onchange="App.filterCategoriesByType(this.value)">
-                        <option value="expense" ${tx.type === 'expense' ? 'selected' : ''}>Saída / Despesa</option>
-                        <option value="income" ${tx.type === 'income' ? 'selected' : ''}>Entrada / Receita</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Valor</label>
-                    <input type="number" step="0.01" id="txAmount" class="input-field" value="${tx.amount}" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Categoria</label>
-                    <select id="txCategory" class="input-field" required>
-                        ${filteredCats.map(c => `<option value="${c.id}" ${tx.categoryId === c.id ? 'selected' : ''}>${c.icon} ${c.name}</option>`).join('')}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Responsável</label>
-                    <select id="txAssignedTo" class="input-field">
-                        <option value="Casal / Ambos" ${tx.assignedTo === 'Casal / Ambos' ? 'selected' : ''}>👩‍❤️‍👨 Casal / Ambos</option>
-                        ${userOptions}
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">País</label>
-                    <select id="txCountry" class="input-field">
-                        <option value="ES" ${tx.country === 'ES' ? 'selected' : ''}>🇪🇸 Espanha (€)</option>
-                        <option value="BR" ${tx.country === 'BR' ? 'selected' : ''}>🇧🇷 Brasil (R$)</option>
+                    <select id="txType" class="input-field" onchange="App.filterCategoriesInModal()">
+                        <option value="expense" ${t && t.type === 'expense' ? 'selected' : ''}>Saída / Despesa</option>
+                        <option value="income" ${t && t.type === 'income' ? 'selected' : ''}>Entrada / Receita</option>
                     </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Data</label>
-                    <input type="date" id="txDate" class="input-field" value="${tx.date}" required>
+                    <input type="date" id="txDate" class="input-field" value="${t ? t.date : today}" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Categoria</label>
+                    <select id="txCategory" class="input-field" required>
+                        ${state.categories.map(c => `<option value="${c.id}" ${t && t.categoryId === c.id ? 'selected' : ''}>${c.icon} ${c.name}</option>`).join('')}
+                    </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Descrição</label>
-                    <input type="text" id="txDesc" class="input-field" value="${tx.description || ''}">
+                    <input type="text" id="txDesc" class="input-field" value="${t ? t.description || '' : ''}">
                 </div>
-                <button type="submit" class="btn-primary" style="width:100%">Salvar Alterações</button>
+                <div class="form-group">
+                    <label class="form-label">Responsável</label>
+                    <input type="text" id="txAssigned" class="input-field" value="${t ? t.assignedTo || 'Casal' : 'Casal'}">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">País</label>
+                    <select id="txCountry" class="input-field">
+                        <option value="ES" ${t && t.country === 'ES' ? 'selected' : ''}>🇪🇸 Espanha</option>
+                        <option value="BR" ${t && t.country === 'BR' ? 'selected' : ''}>🇧🇷 Brasil</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Valor</label>
+                    <input type="number" step="0.01" id="txAmount" class="input-field" value="${t ? t.amount : ''}" required>
+                </div>
+                <div style="display:flex;gap:10px;margin-top:20px">
+                    <button type="button" class="btn-primary" style="background:#6b7280" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn-primary" style="flex:1">Salvar</button>
+                </div>
             </form>
         `;
-        overlay.classList.add('active');
+
+        overlay.classList.add('show');
     };
 
-    const doSaveTransaction = () => {
-        const amount = parseFloat(el('txAmount').value);
-        const categoryId = el('txCategory').value;
-        const type = el('txType').value;
-        const country = el('txCountry').value;
-        const date = el('txDate').value;
-        const assignedTo = el('txAssignedTo').value;
-        const description = el('txDesc').value.trim();
-
-        if (!amount || amount <= 0) { showToast('Informe um valor válido.', 'error'); return; }
-
-        state.transactions.push({
-            id: generateId(), amount, categoryId, type, country, date, assignedTo, description,
-            userId: state.currentUser.id, createdAt: now()
-        });
-
-        saveState();
-        syncToDrive();
-        closeModal();
-        renderApp();
+    const filterCategoriesInModal = () => {
+        const type = el('txType')?.value;
+        const catSelect = el('txCategory');
+        if (!catSelect) return;
+        const filtered = state.categories.filter(c => !type || c.type === type);
+        catSelect.innerHTML = filtered.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('');
     };
 
-    const doUpdateTransaction = (id) => {
-        const index = state.transactions.findIndex(t => t.id === id);
-        if (index === -1) return;
+    const saveTransaction = async (id = '') => {
+        const date = el('txDate')?.value;
+        const type = el('txType')?.value;
+        const categoryId = el('txCategory')?.value;
+        const description = el('txDesc')?.value.trim();
+        const assignedTo = el('txAssigned')?.value.trim();
+        const country = el('txCountry')?.value;
+        const amount = parseFloat(el('txAmount')?.value);
 
-        const amount = parseFloat(el('txAmount').value);
-        const categoryId = el('txCategory').value;
-        const type = el('txType').value;
-        const country = el('txCountry').value;
-        const date = el('txDate').value;
-        const assignedTo = el('txAssignedTo').value;
-        const description = el('txDesc').value.trim();
+        if (!date || !amount || isNaN(amount)) {
+            showToast('Preencha os campos obrigatórios.', 'error');
+            return;
+        }
 
-        if (!amount || amount <= 0) { showToast('Informe um valor válido.', 'error'); return; }
-
-        state.transactions[index] = {
-            ...state.transactions[index],
-            amount, categoryId, type, country, date, assignedTo, description, updatedAt: now()
-        };
+        if (id) {
+            const index = state.transactions.findIndex(x => x.id === id);
+            if (index !== -1) {
+                state.transactions[index] = { id, date, type, categoryId, description, assignedTo, country, amount };
+            }
+        } else {
+            const newTx = { id: generateId(), date, type, categoryId, description, assignedTo, country, amount };
+            state.transactions.unshift(newTx);
+        }
 
         saveState();
-        syncToDrive();
         closeModal();
         renderApp();
+        showToast(id ? 'Lançamento atualizado!' : 'Lançamento adicionado!');
+        syncToDrive();
     };
 
     const deleteTransaction = (id) => {
-        if (confirm('Remover este lançamento?')) {
-            state.transactions = state.transactions.filter(t => t.id !== id);
+        if (confirm('Deseja realmente excluir este lançamento?')) {
+            state.transactions = state.transactions.filter(x => x.id !== id);
             saveState();
+            renderApp();
+            showToast('Lançamento excluído!');
             syncToDrive();
+        }
+    };
+
+    const closeModal = () => {
+        const overlay = el('modalOverlay');
+        if (overlay) overlay.classList.remove('show');
+    };
+
+    const init = () => {
+        initState();
+        if (!isSetup()) {
+            renderSetup();
+        } else if (!isLoggedIn()) {
+            renderLogin();
+        } else {
             renderApp();
         }
     };
 
-    const nav = (elem) => {
-        document.querySelectorAll('.nav-item').forEach(e => e.classList.remove('active'));
-        document.querySelectorAll('.page').forEach(e => e.classList.remove('active'));
-        elem.classList.add('active');
-        const targetPage = elem.getAttribute('data-page');
-        const pageEl = el(targetPage);
-        if (pageEl) pageEl.classList.add('active');
-    };
-
-    ['click', 'mousemove', 'keypress'].forEach(evt => {
-        document.addEventListener(evt, resetInactivityTimer, true);
-    });
-
     return {
-        init: () => {
-            initState();
-            if (!isSetup()) renderSetup();
-            else if (!isLoggedIn()) renderLogin();
-            else renderApp();
-        },
-        doLogin, doSetup, logout, nav, resetAllData, togglePrivacy,
-        showAddTransactionModal, showEditTransactionModal,
-        doSaveTransaction, doUpdateTransaction, deleteTransaction,
-        closeModal, filterCategoriesByType, saveGoogleSettings, syncFromDrive,
-        updateReportView, exportToExcel
+        init,
+        nav,
+        doSetup,
+        doLogin,
+        logout,
+        togglePrivacy,
+        syncFromDrive,
+        syncToDrive,
+        exportToExcel,
+        updateReportView,
+        resetAllData,
+        saveSettings,
+        showAddTransactionModal,
+        showEditTransactionModal,
+        filterCategoriesInModal,
+        saveTransaction,
+        deleteTransaction,
+        closeModal
     };
 })();
 
-window.App = App;
-
-document.addEventListener('DOMContentLoaded', () => { App.init(); });
+document.addEventListener('DOMContentLoaded', App.init);
