@@ -78,44 +78,44 @@ const App = (() => {
     const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
     const now = () => new Date().toISOString();
 
-    // --- LISTA EXPANDIDA DE CATEGORIAS (ESPANHA & BRASIL) ---
+    // --- LISTA DE CATEGORIAS ---
     const defaultCategories = [
         // Receitas Espanha
-        { id: 'cat_salario_es', name: 'Salário / Emprego (ES)', type: 'income', country: 'ES', icon: '💼' },
-        { id: 'cat_freelance_es', name: 'Trabalho Freelance / Extras (ES)', type: 'income', country: 'ES', icon: '💻' },
-        { id: 'cat_outras_entradas_es', name: 'Outras Receitas (ES)', type: 'income', country: 'ES', icon: '💶' },
+        { id: 'cat_salario_es', name: 'Salário / Emprego', type: 'income', country: 'ES', icon: '💼' },
+        { id: 'cat_freelance_es', name: 'Trabalho Freelance / Extras', type: 'income', country: 'ES', icon: '💻' },
+        { id: 'cat_outras_entradas_es', name: 'Outras Receitas', type: 'income', country: 'ES', icon: '💶' },
 
         // Receitas Brasil
-        { id: 'cat_aluguel_br', name: 'Receita Aluguel (BR)', type: 'income', country: 'BR', icon: '🏠' },
-        { id: 'cat_outras_entradas_br', name: 'Outras Receitas (BR)', type: 'income', country: 'BR', icon: '🇧🇷' },
+        { id: 'cat_aluguel_br', name: 'Receita Aluguel', type: 'income', country: 'BR', icon: '🏠' },
+        { id: 'cat_outras_entradas_br', name: 'Outras Receitas', type: 'income', country: 'BR', icon: '🇧🇷' },
         
         // Despesas Espanha
-        { id: 'cat_aluguel_es', name: 'Aluguel de Moradia (ES)', type: 'expense', country: 'ES', icon: '🔑' },
-        { id: 'cat_hipoteca_es', name: 'Hipoteca / Financiamento (ES)', type: 'expense', country: 'ES', icon: '🏛️' },
+        { id: 'cat_aluguel_es', name: 'Aluguel de Moradia', type: 'expense', country: 'ES', icon: '🔑' },
+        { id: 'cat_hipoteca_es', name: 'Hipoteca / Financiamento', type: 'expense', country: 'ES', icon: '🏛️' },
         { id: 'cat_comunidad', name: 'Comunidad / Condomínio', type: 'expense', country: 'ES', icon: '🏢' },
         { id: 'cat_agua', name: 'Água', type: 'expense', country: 'ES', icon: '💧' },
         { id: 'cat_luz', name: 'Energia / Luz', type: 'expense', country: 'ES', icon: '⚡' },
         { id: 'cat_gas', name: 'Gás', type: 'expense', country: 'ES', icon: '🔥' },
         { id: 'cat_mercado', name: 'Mercado / Alimentação', type: 'expense', country: 'ES', icon: '🛒' },
-        { id: 'cat_escola', name: 'Escola / Crianças (10 e 7a)', type: 'expense', country: 'ES', icon: '🎒' },
+        { id: 'cat_escola', name: 'Escola / Crianças', type: 'expense', country: 'ES', icon: '🎒' },
         { id: 'cat_metro', name: 'Metrô / Transporte Público', type: 'expense', country: 'ES', icon: '🚇' },
-        { id: 'cat_veiculo', name: 'Veículo / Manutenção / Documentos', type: 'expense', country: 'ES', icon: '🚗' },
+        { id: 'cat_veiculo', name: 'Veículo / Manutenção', type: 'expense', country: 'ES', icon: '🚗' },
         { id: 'cat_combustivel', name: 'Combustível', type: 'expense', country: 'ES', icon: '⛽' },
-        { id: 'cat_seguros', name: 'Seguros (Saúde, Carro, Casa)', type: 'expense', country: 'ES', icon: '🛡️' },
+        { id: 'cat_seguros', name: 'Seguros', type: 'expense', country: 'ES', icon: '🛡️' },
         { id: 'cat_impostos', name: 'Impostos / Tasas / IRPF', type: 'expense', country: 'ES', icon: '🧾' },
         { id: 'cat_telecom', name: 'Internet + Celulares', type: 'expense', country: 'ES', icon: '📱' },
-        { id: 'cat_utensilios', name: 'Utensílios / Início de vida ES', type: 'expense', country: 'ES', icon: '📦' },
+        { id: 'cat_utensilios', name: 'Utensílios / Casa', type: 'expense', country: 'ES', icon: '📦' },
         { id: 'cat_trabalho', name: 'Materiais de Trabalho', type: 'expense', country: 'ES', icon: '💻' },
         { id: 'cat_lazer', name: 'Lazer & Família', type: 'expense', country: 'ES', icon: '🎬' },
-        { id: 'cat_outros_es', name: 'Outros (ES)', type: 'expense', country: 'ES', icon: '📋' },
+        { id: 'cat_outros_es', name: 'Outros Despesas', type: 'expense', country: 'ES', icon: '📋' },
 
         // Despesas Brasil
-        { id: 'cat_cc_br', name: 'Cartão de Crédito BR', type: 'expense', country: 'BR', icon: '💳' },
-        { id: 'cat_impostos_br', name: 'Impostos / Taxas BR', type: 'expense', country: 'BR', icon: '🧾' },
-        { id: 'cat_outros_br', name: 'Compromissos BR', type: 'expense', country: 'BR', icon: '🇧🇷' }
+        { id: 'cat_cc_br', name: 'Cartão de Crédito', type: 'expense', country: 'BR', icon: '💳' },
+        { id: 'cat_impostos_br', name: 'Impostos / Taxas', type: 'expense', country: 'BR', icon: '🧾' },
+        { id: 'cat_outros_br', name: 'Compromissos Diversos', type: 'expense', country: 'BR', icon: '🇧🇷' }
     ];
 
-    // --- PERSISTÊNCIA DE DADOS ---
+    // --- PERSISTÊNCIA ---
     const initState = () => {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
@@ -144,7 +144,7 @@ const App = (() => {
     };
 
     const resetAllData = () => {
-        if (confirm('Isso apagará todos os dados locais e redefinirá o sistema para o primeiro cadastro. Deseja continuar?')) {
+        if (confirm('Isso apagará todos os dados locais e redefinirá o sistema. Deseja continuar?')) {
             localStorage.clear();
             sessionStorage.clear();
             location.reload();
@@ -186,7 +186,7 @@ const App = (() => {
         return true;
     };
 
-    // --- CÁLCULOS FINANCEIROS ---
+    // --- CÁLCULOS ---
     const getMonthRange = (year, month) => {
         const start = new Date(year, month - 1, state.settings.monthStartDay || 1);
         const end = new Date(year, month, state.settings.monthStartDay || 1);
@@ -209,21 +209,10 @@ const App = (() => {
 
     const getMonthTotals = (year, month) => {
         const txs = getTransactionsForMonth(year, month);
+        const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
 
-        const income = txs
-            .filter(t => t.type === 'income')
-            .reduce((s, t) => s + (Number.isFinite(Number(t.amount)) ? Number(t.amount) : 0), 0);
-
-        const expense = txs
-            .filter(t => t.type === 'expense')
-            .reduce((s, t) => s + (Number.isFinite(Number(t.amount)) ? Number(t.amount) : 0), 0);
-
-        return {
-            income,
-            expense,
-            balance: income - expense,
-            count: txs.length
-        };
+        return { income, expense, balance: income - expense, count: txs.length };
     };
 
     const getCategoryTotals = (year, month) => {
@@ -238,7 +227,7 @@ const App = (() => {
                     category: state.categories.find(c => c.id === t.categoryId) || { name: 'Outros', icon: '📋' }
                 };
             }
-            map[t.categoryId].amount += Number.isFinite(Number(t.amount)) ? Number(t.amount) : 0;
+            map[t.categoryId].amount += Number(t.amount) || 0;
             map[t.categoryId].count++;
         });
 
@@ -251,7 +240,7 @@ const App = (() => {
         return months;
     };
 
-    // --- AUTENTICAÇÃO E SETUP ---
+    // --- AUTENTICAÇÃO ---
     const doSetup = async () => {
         try {
             const name = el('setupName')?.value.trim();
@@ -259,110 +248,74 @@ const App = (() => {
             const pwd = el('setupPwd')?.value;
             const pwd2 = el('setupPwd2')?.value;
 
-            if (!name || !email || !pwd) {
-                showToast('Preencha todos os campos.', 'error');
-                return;
-            }
-
-            if (pwd.length < 6) {
-                showToast('A senha deve ter no mínimo 6 caracteres.', 'error');
-                return;
-            }
-
-            if (pwd !== pwd2) {
-                showToast('As senhas não coincidem.', 'error');
-                return;
-            }
+            if (!name || !email || !pwd) { showToast('Preencha todos os campos.', 'error'); return; }
+            if (pwd.length < 6) { showToast('A senha deve ter no mínimo 6 caracteres.', 'error'); return; }
+            if (pwd !== pwd2) { showToast('As senhas não coincidem.', 'error'); return; }
 
             const passwordHash = await hashPwd(pwd);
-            const user = {
-                id: generateId(),
-                name,
-                email,
-                passwordHash,
-                role: 'admin',
-                createdAt: now()
-            };
+            const user = { id: generateId(), name, email, passwordHash, role: 'admin', createdAt: now() };
 
             state.users = [user];
             saveState();
             setSession(user.id);
             renderApp();
             showToast('Conta principal criada!');
-
         } catch (err) {
-            console.error('Erro em doSetup:', err);
+            console.error(err);
             showToast('Erro ao criar a conta.', 'error');
         }
     };
 
     const doLogin = async () => {
         try {
-            const email = el('loginEmail').value.trim().toLowerCase();
-            const pwd = el('loginPwd').value;
+            const email = el('loginEmail')?.value.trim().toLowerCase();
+            const pwd = el('loginPwd')?.value;
 
-            if (!email || !pwd) {
-                showToast('Preencha e-mail e senha.', 'error');
-                return;
-            }
-
+            if (!email || !pwd) { showToast('Preencha e-mail e senha.', 'error'); return; }
             const user = state.users.find(u => String(u.email).toLowerCase() === email);
 
-            if (!user) {
-                showToast('Usuário ou senha inválidos.', 'error');
-                return;
-            }
-
+            if (!user) { showToast('Usuário ou senha inválidos.', 'error'); return; }
             const hash = await hashPwd(pwd);
-            if (user.passwordHash !== hash) {
-                showToast('Usuário ou senha inválidos.', 'error');
-                return;
-            }
+            if (user.passwordHash !== hash) { showToast('Usuário ou senha inválidos.', 'error'); return; }
 
             setSession(user.id);
             renderApp();
             showToast(`Bem-vindo(a), ${user.name}!`);
-
         } catch (err) {
-            console.error('Erro em doLogin:', err);
+            console.error(err);
             showToast('Erro ao entrar.', 'error');
         }
     };
 
-    const logout = () => {
-        clearSession();
-        renderLogin();
-    };
+    const logout = () => { clearSession(); renderLogin(); };
 
-    // --- TELAS DO SISTEMA ---
+    // --- RENDERIZADORES DE TELA ---
     const renderLogin = () => {
-    const app = el('app');
-    app.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
-        <div style="background:#fff;border-radius:20px;padding:40px;max-width:420px;width:90%;box-shadow:0 25px 80px rgba(0,0,0,.3)">
-            <div style="text-align:center;margin-bottom:28px">
-                <div style="width:64px;height:64px;background:var(--navy);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">💶</div>
-                <h1 style="margin:0;font-size:24px;color:var(--navy)">Controle Financeiro</h1>
-                <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">València 🇪🇸 & Brasil 🇧🇷</p>
-            </div>
-            <!-- Alterado de <div> para <form> com onsubmit -->
-            <form id="loginForm" onsubmit="event.preventDefault(); App.doLogin();">
-                <div class="form-group">
-                    <label class="form-label">Email</label>
-                    <input type="email" id="loginEmail" name="username" autocomplete="username" class="input-field" placeholder="seu@email.com" required>
+        const app = el('app');
+        app.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
+            <div style="background:#fff;border-radius:20px;padding:40px;max-width:420px;width:90%;box-shadow:0 25px 80px rgba(0,0,0,.3)">
+                <div style="text-align:center;margin-bottom:28px">
+                    <div style="width:64px;height:64px;background:var(--navy);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">💶</div>
+                    <h1 style="margin:0;font-size:24px;color:var(--navy)">Controle Financeiro</h1>
+                    <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">València 🇪🇸 & Brasil 🇧🇷</p>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">Senha</label>
-                    <input type="password" id="loginPwd" name="password" autocomplete="current-password" class="input-field" placeholder="Sua senha" required>
+                <form id="loginForm" onsubmit="event.preventDefault(); App.doLogin();">
+                    <div class="form-group">
+                        <label class="form-label">Email</label>
+                        <input type="email" id="loginEmail" name="username" autocomplete="username" class="input-field" placeholder="seu@email.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Senha</label>
+                        <input type="password" id="loginPwd" name="password" autocomplete="current-password" class="input-field" placeholder="Sua senha" required>
+                    </div>
+                    <button type="submit" class="btn-primary" style="width:100%;padding:14px">Entrar</button>
+                </form>
+                <div style="text-align:center;margin-top:20px;display:flex;flex-direction:column;gap:10px">
+                    <button onclick="App.resetAllData()" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;text-decoration:underline">Redefinir Dados / Criar Conta do Zero</button>
                 </div>
-                <button type="submit" class="btn-primary" style="width:100%;padding:14px">Entrar</button>
-            </form>
-            <div style="text-align:center;margin-top:20px;display:flex;flex-direction:column;gap:10px">
-                <p style="margin:0;font-size:13px;color:var(--text-light)">Acesso exclusivo da família.</p>
-                <button onclick="App.resetAllData()" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;text-decoration:underline">Redefinir Dados / Criar Conta do Zero</button>
             </div>
-        </div>
-    </div>`;
-};
+        </div>`;
+    };
 
     const renderSetup = () => {
         const app = el('app');
@@ -373,13 +326,13 @@ const App = (() => {
                     <h1 style="margin:0;font-size:24px;color:var(--navy)">Primeiro Acesso</h1>
                     <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">Cadastre o usuário administrador da família</p>
                 </div>
-                <div id="setupForm">
-                    <div class="form-group"><label class="form-label">Nome Completo</label><input type="text" id="setupName" class="input-field" placeholder="Ex: João Silva"></div>
-                    <div class="form-group"><label class="form-label">Email</label><input type="email" id="setupEmail" class="input-field" placeholder="joao@email.com"></div>
-                    <div class="form-group"><label class="form-label">Senha (mínimo 6 caracteres)</label><input type="password" id="setupPwd" class="input-field" placeholder="Sua senha"></div>
-                    <div class="form-group"><label class="form-label">Confirmar Senha</label><input type="password" id="setupPwd2" class="input-field" placeholder="Repita a senha"></div>
-                    <button class="btn-primary" style="width:100%;padding:14px" onclick="App.doSetup()">Criar Conta Administrador</button>
-                </div>
+                <form onsubmit="event.preventDefault(); App.doSetup();">
+                    <div class="form-group"><label class="form-label">Nome Completo</label><input type="text" id="setupName" class="input-field" placeholder="Ex: João Silva" required></div>
+                    <div class="form-group"><label class="form-label">Email</label><input type="email" id="setupEmail" class="input-field" placeholder="joao@email.com" required></div>
+                    <div class="form-group"><label class="form-label">Senha (mínimo 6 caracteres)</label><input type="password" id="setupPwd" class="input-field" required minlength="6"></div>
+                    <div class="form-group"><label class="form-label">Confirmar Senha</label><input type="password" id="setupPwd2" class="input-field" required minlength="6"></div>
+                    <button type="submit" class="btn-primary" style="width:100%;padding:14px">Criar Conta Administrador</button>
+                </form>
             </div>
         </div>`;
     };
@@ -454,28 +407,31 @@ const App = (() => {
         </div>
         <div class="card" style="padding:20px">
             <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">🕐 Últimos Lançamentos</h3>
-            ${recent.length === 0 ? `<div class="empty-state"><div style="font-size:48px;margin-bottom:12px">📝</div><p>Nenhum lançamento registrado ainda.</p></div>` : `
+            ${recent.length === 0 ? `<div class="empty-state"><p>Nenhum lançamento registrado ainda.</p></div>` : `
             <div class="table-container">
                 <table class="data-table">
-                    <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th>Ações</th></tr></thead>
-                    <tbody>${recent.map(t => {
-                        const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
-                        return `<tr>
-                            <td>${fmtDate(t.date)}</td>
-                            <td><span class="category-tag">${cat.icon} ${cat.name}</span></td>
-                            <td>${t.description || '-'}</td>
-                            <td><span class="badge badge-info">👤 ${t.assignedTo || 'Casal'}</span></td>
-                            <td><span class="badge ${t.country === 'BR' ? 'badge-info' : 'badge-warning'}">${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</span></td>
-                            <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES)}</td>
-                            <td>
-                                <button onclick="App.showEditTransactionModal('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px;margin-right:8px" title="Editar">✏️</button>
-                                <button onclick="App.deleteTransaction('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px" title="Excluir">🗑️</button>
-                            </td>
-                        </tr>`;
-                    }).join('')}</tbody>
+                    <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
+                    <tbody>${recent.map(t => renderTransactionRow(t)).join('')}</tbody>
                 </table>
             </div>`}
         </div>`;
+    };
+
+    const renderTransactionRow = (t) => {
+        const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
+        const isBR = t.country === 'BR';
+        return `<tr>
+            <td style="white-space:nowrap">${fmtDate(t.date)}</td>
+            <td><span class="category-tag" style="white-space:nowrap">${cat.icon} ${cat.name}</span></td>
+            <td>${t.description || '-'}</td>
+            <td><span class="badge badge-info" style="white-space:nowrap">👤 ${t.assignedTo || 'Casal'}</span></td>
+            <td style="white-space:nowrap"><span class="badge ${isBR ? 'badge-info' : 'badge-warning'}">${isBR ? '🇧🇷 Brasil' : '🇪🇸 Espanha'}</span></td>
+            <td style="font-weight:600;white-space:nowrap;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, isBR ? state.settings.currencyBR : state.settings.currencyES)}</td>
+            <td style="text-align:right;white-space:nowrap">
+                <button onclick="App.showEditTransactionModal('${t.id}')" style="background:#e0f2fe;color:#0369a1;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600;margin-right:6px" title="Editar">✏️ Editar</button>
+                <button onclick="App.deleteTransaction('${t.id}')" style="background:#fee2e2;color:#b91c1c;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600" title="Excluir">🗑️ Excluir</button>
+            </td>
+        </tr>`;
     };
 
     const renderDashboardCharts = () => {
@@ -484,7 +440,7 @@ const App = (() => {
         if (charts.categories) charts.categories.destroy();
         if (charts.yearly) charts.yearly.destroy();
 
-        const ctx1 = document.getElementById('chartCategories');
+        const ctx1 = el('chartCategories');
         if (ctx1 && catTotals.length > 0) {
             charts.categories = new Chart(ctx1, {
                 type: 'doughnut',
@@ -496,14 +452,11 @@ const App = (() => {
                         borderWidth: 2, borderColor: '#fff'
                     }]
                 },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { position: 'bottom', labels: { padding: 12, font: { size: 11 } } } }
-                }
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
             });
         }
 
-        const ctx2 = document.getElementById('chartYearly');
+        const ctx2 = el('chartYearly');
         if (ctx2) {
             const yearly = getYearlyData(year);
             charts.yearly = new Chart(ctx2, {
@@ -515,11 +468,7 @@ const App = (() => {
                         { label: 'Saídas', data: yearly.map(m => m.expense), backgroundColor: '#dc2626', borderRadius: 4 }
                     ]
                 },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    scales: { y: { beginAtZero: true } },
-                    plugins: { legend: { position: 'bottom' } }
-                }
+                options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true } }, plugins: { legend: { position: 'bottom' } } }
             });
         }
     };
@@ -528,7 +477,7 @@ const App = (() => {
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
             <div>
                 <h2 style="margin:0;font-size:22px;color:var(--navy)">Lançamentos</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Registro de entradas e saídas (Espanha & Brasil)</p>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Registro completo de movimentações</p>
             </div>
             <button class="btn-primary" onclick="App.showAddTransactionModal()">+ Novo Lançamento</button>
         </div>
@@ -540,27 +489,12 @@ const App = (() => {
     const renderTransactionsTable = () => {
         const txs = state.transactions.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
         if (txs.length === 0) {
-            return `<div class="empty-state"><div style="font-size:48px;margin-bottom:12px">💳</div><p>Nenhum lançamento cadastrado. Clique no botão acima para adicionar.</p></div>`;
+            return `<div class="empty-state"><p>Nenhum lançamento cadastrado.</p></div>`;
         }
         return `<div class="table-container">
             <table class="data-table">
-                <thead><tr><th>Data</th><th>Categoria</th><th>Descrição / Detalhe</th><th>Responsável</th><th>País</th><th>Valor</th><th>Tipo</th><th>Ações</th></tr></thead>
-                <tbody>${txs.map(t => {
-                    const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
-                    return `<tr>
-                        <td>${fmtDate(t.date)}</td>
-                        <td><span class="category-tag">${cat.icon} ${cat.name}</span></td>
-                        <td>${t.description || '-'}</td>
-                        <td><span class="badge badge-info">👤 ${t.assignedTo || 'Casal'}</span></td>
-                        <td><span class="badge ${t.country === 'BR' ? 'badge-info' : 'badge-warning'}">${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</span></td>
-                        <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES)}</td>
-                        <td><span class="badge ${t.type === 'income' ? 'badge-success' : 'badge-danger'}">${t.type === 'income' ? 'Entrada' : 'Saída'}</span></td>
-                        <td>
-                            <button onclick="App.showEditTransactionModal('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px;margin-right:8px" title="Editar">✏️</button>
-                            <button onclick="App.deleteTransaction('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px" title="Excluir">🗑️</button>
-                        </td>
-                    </tr>`;
-                }).join('')}</tbody>
+                <thead><tr><th>Data</th><th>Categoria</th><th>Descrição / Detalhe</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
+                <tbody>${txs.map(t => renderTransactionRow(t)).join('')}</tbody>
             </table>
         </div>`;
     };
@@ -570,7 +504,7 @@ const App = (() => {
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
             <div>
                 <h2 style="margin:0;font-size:22px;color:var(--navy)">Relatório Mensal</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Detalhamento por país e categoria</p>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Detalhamento das despesas e receitas por categoria</p>
             </div>
         </div>
         <div id="reportContent">${renderReportContent(year, month)}</div>`;
@@ -605,35 +539,30 @@ const App = (() => {
         </div>`;
     };
 
-    const renderUsersList = () => {
-        return state.users.map(u => `
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #eee">
-                <div>
-                    <div style="font-weight:600;color:var(--navy)">${u.name}</div>
-                    <div style="font-size:12px;color:var(--text-light)">${u.email}</div>
-                </div>
-                <span class="badge ${u.role === 'admin' ? 'badge-info' : 'badge-success'}">${u.role === 'admin' ? 'Administrador' : 'Acesso Família'}</span>
-            </div>
-        `).join('');
-    };
-
     const renderSettings = () => {
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
             <div>
                 <h2 style="margin:0;font-size:22px;color:var(--navy)">Configurações</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Gerencie acessos do casal e preferências</p>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Gerencie acessos e preferências</p>
             </div>
-            <button class="btn-primary" onclick="App.showAddUserModal()">+ Adicionar Familiar (Esposa/Marido)</button>
+            <button class="btn-primary" onclick="App.showAddUserModal()">+ Adicionar Familiar</button>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:16px">
             <div class="card" style="padding:24px">
                 <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">👥 Usuários Cadastrados</h3>
-                <div id="usersList">${renderUsersList()}</div>
+                <div>${state.users.map(u => `
+                    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid #eee">
+                        <div>
+                            <div style="font-weight:600;color:var(--navy)">${u.name}</div>
+                            <div style="font-size:12px;color:var(--text-light)">${u.email}</div>
+                        </div>
+                        <span class="badge ${u.role === 'admin' ? 'badge-info' : 'badge-success'}">${u.role === 'admin' ? 'Administrador' : 'Usuário'}</span>
+                    </div>`).join('')}</div>
             </div>
         </div>`;
     };
 
-    // --- MODAIS E AÇÕES DE LANÇAMENTO ---
+    // --- MODAIS E AÇÕES DE EDIÇÃO ---
     const closeModal = () => {
         const overlay = el('modalOverlay');
         if (overlay) overlay.classList.remove('active');
@@ -643,7 +572,7 @@ const App = (() => {
         const select = el('txCategory');
         if (!select) return;
         const filtered = state.categories.filter(c => c.type === type);
-        select.innerHTML = filtered.map(c => `<option value="${c.id}">${c.icon} ${c.name} (${c.country})</option>`).join('');
+        select.innerHTML = filtered.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('');
     };
 
     const showAddTransactionModal = () => {
@@ -675,7 +604,7 @@ const App = (() => {
                 <div class="form-group">
                     <label class="form-label">Categoria</label>
                     <select id="txCategory" class="input-field" required>
-                        ${initialCats.map(c => `<option value="${c.id}">${c.icon} ${c.name} (${c.country})</option>`).join('')}
+                        ${initialCats.map(c => `<option value="${c.id}">${c.icon} ${c.name}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group">
@@ -698,7 +627,7 @@ const App = (() => {
                 </div>
                 <div class="form-group">
                     <label class="form-label">Nome / Detalhe do Lançamento</label>
-                    <input type="text" id="txDesc" class="input-field" placeholder="Ex: Aluguel Apto, Seguro Sanitas, Consum Mercado...">
+                    <input type="text" id="txDesc" class="input-field" placeholder="Ex: Mercado Mercadona, Aluguel...">
                 </div>
                 <button type="submit" class="btn-primary" style="width:100%;margin-top:10px">Salvar Lançamento</button>
             </form>
@@ -708,13 +637,16 @@ const App = (() => {
 
     const showEditTransactionModal = (id) => {
         const tx = state.transactions.find(t => t.id === id);
-        if (!tx) return;
+        if (!tx) {
+            showToast('Lançamento não encontrado.', 'error');
+            return;
+        }
 
         const overlay = el('modalOverlay');
         const content = el('modalContent');
         if (!overlay || !content) return;
 
-        const filteredCats = state.categories.filter(c => c.type === tx.type);
+        const filteredCats = state.categories.filter(c => c.type === (tx.type || 'expense'));
         const userOptions = state.users.map(u => `<option value="${u.name}" ${tx.assignedTo === u.name ? 'selected' : ''}>${u.name}</option>`).join('');
 
         content.innerHTML = `
@@ -737,7 +669,7 @@ const App = (() => {
                 <div class="form-group">
                     <label class="form-label">Categoria</label>
                     <select id="txCategory" class="input-field" required>
-                        ${filteredCats.map(c => `<option value="${c.id}" ${tx.categoryId === c.id ? 'selected' : ''}>${c.icon} ${c.name} (${c.country})</option>`).join('')}
+                        ${filteredCats.map(c => `<option value="${c.id}" ${tx.categoryId === c.id ? 'selected' : ''}>${c.icon} ${c.name}</option>`).join('')}
                     </select>
                 </div>
                 <div class="form-group">
@@ -760,7 +692,7 @@ const App = (() => {
                 </div>
                 <div class="form-group">
                     <label class="form-label">Nome / Detalhe do Lançamento</label>
-                    <input type="text" id="txDesc" class="input-field" value="${tx.description || ''}" placeholder="Ex: Aluguel Apto, Seguro Sanitas...">
+                    <input type="text" id="txDesc" class="input-field" value="${tx.description || ''}" placeholder="Ex: Mercado Mercadona, Aluguel...">
                 </div>
                 <button type="submit" class="btn-primary" style="width:100%;margin-top:10px">Salvar Alterações</button>
             </form>
@@ -777,12 +709,9 @@ const App = (() => {
         const assignedTo = el('txAssignedTo').value;
         const description = el('txDesc').value.trim();
 
-        if (!amount || amount <= 0) {
-            showToast('Informe um valor válido.', 'error');
-            return;
-        }
+        if (!amount || amount <= 0) { showToast('Informe um valor válido.', 'error'); return; }
 
-        const newTx = {
+        state.transactions.push({
             id: generateId(),
             amount,
             categoryId,
@@ -793,9 +722,8 @@ const App = (() => {
             description,
             userId: state.currentUser.id,
             createdAt: now()
-        };
+        });
 
-        state.transactions.push(newTx);
         saveState();
         closeModal();
         renderApp();
@@ -814,27 +742,17 @@ const App = (() => {
         const assignedTo = el('txAssignedTo').value;
         const description = el('txDesc').value.trim();
 
-        if (!amount || amount <= 0) {
-            showToast('Informe um valor válido.', 'error');
-            return;
-        }
+        if (!amount || amount <= 0) { showToast('Informe um valor válido.', 'error'); return; }
 
         state.transactions[index] = {
             ...state.transactions[index],
-            amount,
-            categoryId,
-            type,
-            country,
-            date,
-            assignedTo,
-            description,
-            updatedAt: now()
+            amount, categoryId, type, country, date, assignedTo, description, updatedAt: now()
         };
 
         saveState();
         closeModal();
         renderApp();
-        showToast('Lançamento atualizado com sucesso!');
+        showToast('Lançamento atualizado!');
     };
 
     const deleteTransaction = (id) => {
@@ -857,18 +775,9 @@ const App = (() => {
                 <button class="close-btn" onclick="App.closeModal()">&times;</button>
             </div>
             <form onsubmit="event.preventDefault(); App.doAddUser();">
-                <div class="form-group">
-                    <label class="form-label">Nome Completo</label>
-                    <input type="text" id="newUserName" class="input-field" placeholder="Ex: Maria Silva" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Email de Acesso</label>
-                    <input type="email" id="newUserEmail" class="input-field" placeholder="maria@email.com" required>
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Senha Inicial</label>
-                    <input type="password" id="newUserPwd" class="input-field" placeholder="Mínimo 6 caracteres" required minlength="6">
-                </div>
+                <div class="form-group"><label class="form-label">Nome Completo</label><input type="text" id="newUserName" class="input-field" required></div>
+                <div class="form-group"><label class="form-label">Email de Acesso</label><input type="email" id="newUserEmail" class="input-field" required></div>
+                <div class="form-group"><label class="form-label">Senha Inicial</label><input type="password" id="newUserPwd" class="input-field" required minlength="6"></div>
                 <button type="submit" class="btn-primary" style="width:100%;margin-top:10px">Cadastrar Usuário</button>
             </form>
         `;
@@ -880,22 +789,10 @@ const App = (() => {
         const email = el('newUserEmail').value.trim().toLowerCase();
         const pwd = el('newUserPwd').value;
 
-        if (state.users.some(u => u.email === email)) {
-            showToast('Este e-mail já está cadastrado.', 'error');
-            return;
-        }
+        if (state.users.some(u => u.email === email)) { showToast('Este e-mail já está cadastrado.', 'error'); return; }
 
         const passwordHash = await hashPwd(pwd);
-        const newUser = {
-            id: generateId(),
-            name,
-            email,
-            passwordHash,
-            role: 'user',
-            createdAt: now()
-        };
-
-        state.users.push(newUser);
+        state.users.push({ id: generateId(), name, email, passwordHash, role: 'user', createdAt: now() });
         saveState();
         closeModal();
         renderApp();
@@ -914,30 +811,18 @@ const App = (() => {
     return {
         init: () => {
             initState();
-            if (!isSetup()) {
-                renderSetup();
-            } else if (!isLoggedIn()) {
-                renderLogin();
-            } else {
-                renderApp();
-            }
+            if (!isSetup()) renderSetup();
+            else if (!isLoggedIn()) renderLogin();
+            else renderApp();
         },
-        doLogin,
-        doSetup,
-        logout,
-        nav,
-        resetAllData,
-        showAddTransactionModal,
-        showEditTransactionModal,
-        doSaveTransaction,
-        doUpdateTransaction,
-        deleteTransaction,
-        showAddUserModal,
-        doAddUser,
-        closeModal,
-        filterCategoriesByType
+        doLogin, doSetup, logout, nav, resetAllData,
+        showAddTransactionModal, showEditTransactionModal,
+        doSaveTransaction, doUpdateTransaction, deleteTransaction,
+        showAddUserModal, doAddUser, closeModal, filterCategoriesByType
     };
 })();
+
+window.App = App;
 
 document.addEventListener('DOMContentLoaded', () => {
     App.init();
