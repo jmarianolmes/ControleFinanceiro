@@ -89,7 +89,7 @@ const App = (() => {
         { id: 'cat_aluguel_br', name: 'Receita Aluguel (BR)', type: 'income', country: 'BR', icon: '🏠' },
         { id: 'cat_outras_entradas_br', name: 'Outras Receitas (BR)', type: 'income', country: 'BR', icon: '🇧🇷' },
         
-        // Despesas Espanha (Principais & Detalhadas)
+        // Despesas Espanha
         { id: 'cat_aluguel_es', name: 'Aluguel de Moradia (ES)', type: 'expense', country: 'ES', icon: '🔑' },
         { id: 'cat_hipoteca_es', name: 'Hipoteca / Financiamento (ES)', type: 'expense', country: 'ES', icon: '🏛️' },
         { id: 'cat_comunidad', name: 'Comunidad / Condomínio', type: 'expense', country: 'ES', icon: '🏢' },
@@ -121,7 +121,7 @@ const App = (() => {
         if (raw) {
             try {
                 state = JSON.parse(raw);
-                state.categories = [...defaultCategories]; // Garante categorias sempre atualizadas
+                state.categories = [...defaultCategories];
                 if (!state.settings) state.settings = { currencyBR: 'R$', currencyES: '€', monthStartDay: 1 };
             } catch (e) { resetState(); }
         } else { resetState(); }
@@ -450,7 +450,7 @@ const App = (() => {
             ${recent.length === 0 ? `<div class="empty-state"><div style="font-size:48px;margin-bottom:12px">📝</div><p>Nenhum lançamento registrado ainda.</p></div>` : `
             <div class="table-container">
                 <table class="data-table">
-                    <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th></tr></thead>
+                    <thead><tr><th>Data</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th>Ações</th></tr></thead>
                     <tbody>${recent.map(t => {
                         const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
                         return `<tr>
@@ -460,6 +460,10 @@ const App = (() => {
                             <td><span class="badge badge-info">👤 ${t.assignedTo || 'Casal'}</span></td>
                             <td><span class="badge ${t.country === 'BR' ? 'badge-info' : 'badge-warning'}">${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</span></td>
                             <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES)}</td>
+                            <td>
+                                <button onclick="App.showEditTransactionModal('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px;margin-right:8px" title="Editar">✏️</button>
+                                <button onclick="App.deleteTransaction('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px" title="Excluir">🗑️</button>
+                            </td>
                         </tr>`;
                     }).join('')}</tbody>
                 </table>
@@ -544,7 +548,10 @@ const App = (() => {
                         <td><span class="badge ${t.country === 'BR' ? 'badge-info' : 'badge-warning'}">${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</span></td>
                         <td style="font-weight:600;color:${t.type === 'income' ? 'var(--emerald)' : 'var(--danger)'}">${fmtMoney(t.amount, t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES)}</td>
                         <td><span class="badge ${t.type === 'income' ? 'badge-success' : 'badge-danger'}">${t.type === 'income' ? 'Entrada' : 'Saída'}</span></td>
-                        <td><button onclick="App.deleteTransaction('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px" title="Excluir">🗑️</button></td>
+                        <td>
+                            <button onclick="App.showEditTransactionModal('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px;margin-right:8px" title="Editar">✏️</button>
+                            <button onclick="App.deleteTransaction('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px" title="Excluir">🗑️</button>
+                        </td>
                     </tr>`;
                 }).join('')}</tbody>
             </table>
@@ -639,8 +646,6 @@ const App = (() => {
 
         const defaultType = 'expense';
         const initialCats = state.categories.filter(c => c.type === defaultType);
-
-        // Opções de usuários cadastrados + Casal
         const userOptions = state.users.map(u => `<option value="${u.name}">${u.name}</option>`).join('');
 
         content.innerHTML = `
@@ -694,6 +699,68 @@ const App = (() => {
         overlay.classList.add('active');
     };
 
+    const showEditTransactionModal = (id) => {
+        const tx = state.transactions.find(t => t.id === id);
+        if (!tx) return;
+
+        const overlay = el('modalOverlay');
+        const content = el('modalContent');
+        if (!overlay || !content) return;
+
+        const filteredCats = state.categories.filter(c => c.type === tx.type);
+        const userOptions = state.users.map(u => `<option value="${u.name}" ${tx.assignedTo === u.name ? 'selected' : ''}>${u.name}</option>`).join('');
+
+        content.innerHTML = `
+            <div class="modal-header">
+                <h3 class="modal-title">Editar Lançamento</h3>
+                <button class="close-btn" onclick="App.closeModal()">&times;</button>
+            </div>
+            <form onsubmit="event.preventDefault(); App.doUpdateTransaction('${tx.id}');">
+                <div class="form-group">
+                    <label class="form-label">Tipo de Operação</label>
+                    <select id="txType" class="input-field" onchange="App.filterCategoriesByType(this.value)">
+                        <option value="expense" ${tx.type === 'expense' ? 'selected' : ''}>Saída / Despesa</option>
+                        <option value="income" ${tx.type === 'income' ? 'selected' : ''}>Entrada / Receita</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Valor</label>
+                    <input type="number" step="0.01" id="txAmount" class="input-field" value="${tx.amount}" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Categoria</label>
+                    <select id="txCategory" class="input-field" required>
+                        ${filteredCats.map(c => `<option value="${c.id}" ${tx.categoryId === c.id ? 'selected' : ''}>${c.icon} ${c.name} (${c.country})</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Responsável / Quem Realizou</label>
+                    <select id="txAssignedTo" class="input-field">
+                        <option value="Casal / Ambos" ${tx.assignedTo === 'Casal / Ambos' ? 'selected' : ''}>👩‍❤️‍👨 Casal / Ambos</option>
+                        ${userOptions}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">País / Moeda</label>
+                    <select id="txCountry" class="input-field">
+                        <option value="ES" ${tx.country === 'ES' ? 'selected' : ''}>🇪🇸 Espanha (€ Euro)</option>
+                        <option value="BR" ${tx.country === 'BR' ? 'selected' : ''}>🇧🇷 Brasil (R$ Real)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Data</label>
+                    <input type="date" id="txDate" class="input-field" value="${tx.date}" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Nome / Detalhe do Lançamento</label>
+                    <input type="text" id="txDesc" class="input-field" value="${tx.description || ''}" placeholder="Ex: Aluguel Apto, Seguro Sanitas...">
+                </div>
+                <button type="submit" class="btn-primary" style="width:100%;margin-top:10px">Salvar Alterações</button>
+            </form>
+        `;
+        overlay.classList.add('active');
+    };
+
     const doSaveTransaction = () => {
         const amount = parseFloat(el('txAmount').value);
         const categoryId = el('txCategory').value;
@@ -726,6 +793,41 @@ const App = (() => {
         closeModal();
         renderApp();
         showToast('Lançamento cadastrado com sucesso!');
+    };
+
+    const doUpdateTransaction = (id) => {
+        const index = state.transactions.findIndex(t => t.id === id);
+        if (index === -1) return;
+
+        const amount = parseFloat(el('txAmount').value);
+        const categoryId = el('txCategory').value;
+        const type = el('txType').value;
+        const country = el('txCountry').value;
+        const date = el('txDate').value;
+        const assignedTo = el('txAssignedTo').value;
+        const description = el('txDesc').value.trim();
+
+        if (!amount || amount <= 0) {
+            showToast('Informe um valor válido.', 'error');
+            return;
+        }
+
+        state.transactions[index] = {
+            ...state.transactions[index],
+            amount,
+            categoryId,
+            type,
+            country,
+            date,
+            assignedTo,
+            description,
+            updatedAt: now()
+        };
+
+        saveState();
+        closeModal();
+        renderApp();
+        showToast('Lançamento atualizado com sucesso!');
     };
 
     const deleteTransaction = (id) => {
@@ -819,7 +921,9 @@ const App = (() => {
         nav,
         resetAllData,
         showAddTransactionModal,
+        showEditTransactionModal,
         doSaveTransaction,
+        doUpdateTransaction,
         deleteTransaction,
         showAddUserModal,
         doAddUser,
