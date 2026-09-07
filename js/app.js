@@ -336,26 +336,33 @@ const App = (() => {
 
     // --- TELAS DO SISTEMA ---
     const renderLogin = () => {
-        const app = el('app');
-        app.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
-            <div style="background:#fff;border-radius:20px;padding:40px;max-width:420px;width:90%;box-shadow:0 25px 80px rgba(0,0,0,.3)">
-                <div style="text-align:center;margin-bottom:28px">
-                    <div style="width:64px;height:64px;background:var(--navy);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">💶</div>
-                    <h1 style="margin:0;font-size:24px;color:var(--navy)">Controle Financeiro</h1>
-                    <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">València 🇪🇸 & Brasil 🇧🇷</p>
-                </div>
-                <div id="loginForm">
-                    <div class="form-group"><label class="form-label">Email</label><input type="email" id="loginEmail" class="input-field" placeholder="seu@email.com"></div>
-                    <div class="form-group"><label class="form-label">Senha</label><input type="password" id="loginPwd" class="input-field" placeholder="Sua senha"></div>
-                    <button class="btn-primary" style="width:100%;padding:14px" onclick="App.doLogin()">Entrar</button>
-                    <div style="text-align:center;margin-top:20px;display:flex;flex-direction:column;gap:10px">
-                        <p style="margin:0;font-size:13px;color:var(--text-light)">Acesso exclusivo da família.</p>
-                        <button onclick="App.resetAllData()" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;text-decoration:underline">Redefinir Dados / Criar Conta do Zero</button>
-                    </div>
-                </div>
+    const app = el('app');
+    app.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
+        <div style="background:#fff;border-radius:20px;padding:40px;max-width:420px;width:90%;box-shadow:0 25px 80px rgba(0,0,0,.3)">
+            <div style="text-align:center;margin-bottom:28px">
+                <div style="width:64px;height:64px;background:var(--navy);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">💶</div>
+                <h1 style="margin:0;font-size:24px;color:var(--navy)">Controle Financeiro</h1>
+                <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">València 🇪🇸 & Brasil 🇧🇷</p>
             </div>
-        </div>`;
-    };
+            <!-- Alterado de <div> para <form> com onsubmit -->
+            <form id="loginForm" onsubmit="event.preventDefault(); App.doLogin();">
+                <div class="form-group">
+                    <label class="form-label">Email</label>
+                    <input type="email" id="loginEmail" name="username" autocomplete="username" class="input-field" placeholder="seu@email.com" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Senha</label>
+                    <input type="password" id="loginPwd" name="password" autocomplete="current-password" class="input-field" placeholder="Sua senha" required>
+                </div>
+                <button type="submit" class="btn-primary" style="width:100%;padding:14px">Entrar</button>
+            </form>
+            <div style="text-align:center;margin-top:20px;display:flex;flex-direction:column;gap:10px">
+                <p style="margin:0;font-size:13px;color:var(--text-light)">Acesso exclusivo da família.</p>
+                <button onclick="App.resetAllData()" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;text-decoration:underline">Redefinir Dados / Criar Conta do Zero</button>
+            </div>
+        </div>
+    </div>`;
+};
 
     const renderSetup = () => {
         const app = el('app');
