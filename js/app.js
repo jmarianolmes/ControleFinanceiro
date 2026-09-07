@@ -140,53 +140,137 @@ const App = (() => {
         }
     };
 
-    const syncFromDrive = async (silent = false) => {
-        const url = state.settings.googleScriptUrl;
-        if (!url) {
-            if (!silent) showToast('⚠️ URL do Google Drive não configurada.', 'error');
-            return;
-        }
-        try {
-            if (!silent) showToast('🔄 Sincronizando com o Drive...', 'info');
+   const syncFromDrive = async (silent = false) => {
+    const url = state.settings.googleScriptUrl;
+    if (!url) {
+        if (!silent) showToast('⚠️ URL do Google Drive não configurada.', 'error');
+        return;
+    }
+    try {
+        if (!silent) showToast('🔄 Sincronizando com o Drive...', 'info');
+        
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ 
+                action: 'fetch', 
+                token: state.settings.apiToken || DEFAULT_TOKEN 
+            })
+        });
+        const data = await res.json();
+        
+        if (data.status === 'success' && Array.isArray(data.transactions)) {
+            console.log('📥 Dados brutos do Drive:', data.transactions.length, 'registros');
             
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ 
-                    action: 'fetch', 
-                    token: state.settings.apiToken || DEFAULT_TOKEN 
-                })
-            });
-            const data = await res.json();
-            
-            if (data.status === 'success' && Array.isArray(data.transactions)) {
-                // NORMALIZA AS DATAS AO IMPORTAR
-                state.transactions = data.transactions.map(t => {
-                    try {
-                        const d = new Date(t.date);
-                        if (!isNaN(d.getTime())) {
-                            t.date = d.toISOString().slice(0, 10);
+            // NORMALIZAÇÃO COMPLETA
+            state.transactions = data.transactions.map(t => {
+                // Garante que todos os campos existam
+                const normalized = {
+                    id: t.id || generateId(),
+                    date: '',
+                    type: t.type || 'expense',
+                    categoryId: t.categoryId || 'cat_outros_es',
+                    description: t.description || '',
+                    assignedTo: t.assignedTo || 'Casal',
+                    country: t.country || 'ES',
+                    amount: Number(t.amount) || 0
+                };
+                
+                // ============================================================
+                // NORMALIZAÇÃO DE DATA - SUPORTA TODOS OS FORMATOS
+                // ============================================================
+                try {
+                    if (t.date) {
+                        let dateStr = String(t.date).trim();
+                        console.log('🔄 Normalizando data:', dateStr);
+                        
+                        // CASO 1: "Mon Sep 07 2026 00:00:00 GM" (formato JavaScript)
+                        // Extrai: Mês, Dia, Ano
+                        const jsDateMatch = dateStr.match(/([A-Za-z]{3})\s+([A-Za-z]{3})\s+(\d{2})\s+(\d{4})/);
+                        if (jsDateMatch) {
+                            const monthMap = {
+                                'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+                                'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+                                'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+                            };
+                            const month = monthMap[jsDateMatch[2]] || '01';
+                            const day = jsDateMatch[3].padStart(2, '0');
+                            const year = jsDateMatch[4];
+                            normalized.date = `${year}-${month}-${day}`;
+                            console.log('  ✅ Formato JS convertido para:', normalized.date);
                         }
-                    } catch (e) {}
-                    t.amount = Number(t.amount) || 0;
-                    return t;
-                });
-                
-                saveState();
-                refreshAllViews();
-                
-                if (!silent) {
-                    showToast(`✅ ${data.transactions.length} registros sincronizados!`);
+                        // CASO 2: DD/MM/YYYY
+                        else if (dateStr.includes('/')) {
+                            const parts = dateStr.split('/');
+                            if (parts.length === 3) {
+                                const day = parts[0].padStart(2, '0');
+                                const month = parts[1].padStart(2, '0');
+                                const year = parts[2];
+                                normalized.date = `${year}-${month}-${day}`;
+                                console.log('  ✅ Formato DD/MM/YYYY convertido para:', normalized.date);
+                            }
+                        }
+                        // CASO 3: YYYY-MM-DD (já está correto)
+                        else if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
+                            normalized.date = dateStr.slice(0, 10);
+                            console.log('  ✅ Formato ISO mantido:', normalized.date);
+                        }
+                        // CASO 4: Tenta usar new Date() como fallback
+                        else {
+                            const d = new Date(dateStr);
+                            if (!isNaN(d.getTime())) {
+                                normalized.date = d.toISOString().slice(0, 10);
+                                console.log('  ✅ Fallback new Date() ->:', normalized.date);
+                            } else {
+                                // Último recurso: usa a data atual
+                                normalized.date = new Date().toISOString().slice(0, 10);
+                                console.log('  ⚠️ Fallback data atual:', normalized.date);
+                            }
+                        }
+                    } else {
+                        normalized.date = new Date().toISOString().slice(0, 10);
+                        console.log('  ⚠️ Sem data, usando atual:', normalized.date);
+                    }
+                } catch (e) {
+                    console.error('  ❌ Erro ao normalizar data:', e);
+                    normalized.date = new Date().toISOString().slice(0, 10);
                 }
-            } else {
-                if (!silent) showToast(data.message || '❌ Erro ao consultar o Banco de Dados.', 'error');
+                
+                return normalized;
+            });
+            
+            saveState();
+            
+            // FORÇA ATUALIZAÇÃO COMPLETA DA INTERFACE
+            refreshAllViews();
+            
+            // ATUALIZA O SELETOR DE MÊS
+            const monthPicker = el('dashMonthPicker');
+            if (monthPicker) monthPicker.value = state.selectedMonth;
+            
+            // MOSTRA ESTATÍSTICAS NO CONSOLE
+            console.log('📊 Dados normalizados:', state.transactions.length, 'registros');
+            console.log('📅 Exemplos de datas normalizadas:');
+            state.transactions.slice(0, 3).forEach(t => {
+                console.log(`  - ${t.date} (${t.type}) - ${t.description || 'sem descrição'}`);
+            });
+            
+            if (!silent) {
+                showToast(`✅ ${data.transactions.length} registros sincronizados do Drive!`);
             }
-        } catch (e) {
-            if (!silent) showToast('❌ Erro ao consultar o Banco de Dados.', 'error');
-            console.error('Sync error:', e);
+            
+            // Mostra quantos registros têm data válida
+            const validDates = state.transactions.filter(t => t.date && t.date.length === 10);
+            console.log(`📅 ${validDates.length}/${state.transactions.length} registros com data válida`);
+            
+        } else {
+            if (!silent) showToast(data.message || '❌ Erro ao consultar o Banco de Dados.', 'error');
         }
-    };
-
+    } catch (e) {
+        if (!silent) showToast('❌ Erro ao consultar o Banco de Dados.', 'error');
+        console.error('❌ Sync error:', e);
+    }
+};
     const checkConnection = async () => {
         const dot = el('connStatusDot');
         const text = el('connStatusText');
