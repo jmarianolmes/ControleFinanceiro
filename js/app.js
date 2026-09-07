@@ -6,13 +6,12 @@ const App = (() => {
         users: [],
         transactions: [],
         categories: [],
-        settings: { currencyBR: 'R$', currencyES: '€', monthStartDay: 1 },
+        settings: { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '' },
         currentUser: null,
         sessionExpiry: null
     };
     let charts = {};
 
-    // --- HELPER FUNCTIONS ---
     const el = id => document.getElementById(id);
     
     const fmtDate = d => {
@@ -52,20 +51,13 @@ const App = (() => {
         return simpleHash(value);
     };
 
-    // --- TOAST NOTIFICATIONS ---
     let pendingToast = null;
-
     const showToast = (msg, type = 'success') => {
         const t = el('toast');
-        if (!t) {
-            pendingToast = { msg, type };
-            return;
-        }
+        if (!t) { pendingToast = { msg, type }; return; }
         t.textContent = String(msg);
         t.className = `toast ${type} show`;
-        setTimeout(() => {
-            t.classList.remove('show');
-        }, 3000);
+        setTimeout(() => { t.classList.remove('show'); }, 3000);
     };
 
     const flushPendingToast = () => {
@@ -78,18 +70,12 @@ const App = (() => {
     const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
     const now = () => new Date().toISOString();
 
-    // --- LISTA DE CATEGORIAS ---
     const defaultCategories = [
-        // Receitas Espanha
         { id: 'cat_salario_es', name: 'Salário / Emprego', type: 'income', country: 'ES', icon: '💼' },
         { id: 'cat_freelance_es', name: 'Trabalho Freelance / Extras', type: 'income', country: 'ES', icon: '💻' },
         { id: 'cat_outras_entradas_es', name: 'Outras Receitas', type: 'income', country: 'ES', icon: '💶' },
-
-        // Receitas Brasil
         { id: 'cat_aluguel_br', name: 'Receita Aluguel', type: 'income', country: 'BR', icon: '🏠' },
         { id: 'cat_outras_entradas_br', name: 'Outras Receitas', type: 'income', country: 'BR', icon: '🇧🇷' },
-        
-        // Despesas Espanha
         { id: 'cat_aluguel_es', name: 'Aluguel de Moradia', type: 'expense', country: 'ES', icon: '🔑' },
         { id: 'cat_hipoteca_es', name: 'Hipoteca / Financiamento', type: 'expense', country: 'ES', icon: '🏛️' },
         { id: 'cat_comunidad', name: 'Comunidad / Condomínio', type: 'expense', country: 'ES', icon: '🏢' },
@@ -108,33 +94,61 @@ const App = (() => {
         { id: 'cat_trabalho', name: 'Materiais de Trabalho', type: 'expense', country: 'ES', icon: '💻' },
         { id: 'cat_lazer', name: 'Lazer & Família', type: 'expense', country: 'ES', icon: '🎬' },
         { id: 'cat_outros_es', name: 'Outros Despesas', type: 'expense', country: 'ES', icon: '📋' },
-
-        // Despesas Brasil
         { id: 'cat_cc_br', name: 'Cartão de Crédito', type: 'expense', country: 'BR', icon: '💳' },
         { id: 'cat_impostos_br', name: 'Impostos / Taxas', type: 'expense', country: 'BR', icon: '🧾' },
         { id: 'cat_outros_br', name: 'Compromissos Diversos', type: 'expense', country: 'BR', icon: '🇧🇷' }
     ];
 
-    // --- PERSISTÊNCIA ---
+    // --- SINCRONIZAÇÃO COM GOOGLE DRIVE ---
+    const syncToDrive = async () => {
+        const url = state.settings.googleScriptUrl;
+        if (!url) return;
+        try {
+            await fetch(url, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'sync', transactions: state.transactions })
+            });
+            showToast('Dados salvos na Planilha do Drive!');
+        } catch (e) {
+            console.error('Erro ao sincronizar com Google Drive:', e);
+        }
+    };
+
+    const syncFromDrive = async () => {
+        const url = state.settings.googleScriptUrl;
+        if (!url) { showToast('URL da planilha não configurada.', 'error'); return; }
+        try {
+            const res = await fetch(url);
+            const data = await res.json();
+            if (data && data.transactions) {
+                state.transactions = data.transactions;
+                saveState();
+                renderApp();
+                showToast('Dados atualizados da Planilha!');
+            }
+        } catch (e) {
+            showToast('Erro ao puxar dados do Drive.', 'error');
+        }
+    };
+
     const initState = () => {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
             try {
                 state = JSON.parse(raw);
                 state.categories = [...defaultCategories];
-                if (!state.settings) state.settings = { currencyBR: 'R$', currencyES: '€', monthStartDay: 1 };
+                if (!state.settings) state.settings = { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '' };
             } catch (e) { resetState(); }
         } else { resetState(); }
     };
 
     const resetState = () => {
         state = {
-            users: [], 
-            transactions: [], 
-            categories: [...defaultCategories],
-            settings: { currencyBR: 'R$', currencyES: '€', monthStartDay: 1 },
-            currentUser: null, 
-            sessionExpiry: null
+            users: [], transactions: [], categories: [...defaultCategories],
+            settings: { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '' },
+            currentUser: null, sessionExpiry: null
         };
         saveState();
     };
@@ -144,23 +158,17 @@ const App = (() => {
     };
 
     const resetAllData = () => {
-        if (confirm('Isso apagará todos os dados locais e redefinirá o sistema. Deseja continuar?')) {
-            localStorage.clear();
-            sessionStorage.clear();
-            location.reload();
+        if (confirm('Isso apagará todos os dados locais. Deseja continuar?')) {
+            localStorage.clear(); sessionStorage.clear(); location.reload();
         }
     };
 
-    // --- GESTÃO DE SESSÃO ---
     const getSession = () => {
         const raw = sessionStorage.getItem(SESSION_KEY);
         if (!raw) return null;
         try {
             const s = JSON.parse(raw);
-            if (new Date(s.expires) < new Date()) {
-                sessionStorage.removeItem(SESSION_KEY);
-                return null;
-            }
+            if (new Date(s.expires) < new Date()) { sessionStorage.removeItem(SESSION_KEY); return null; }
             return s;
         } catch (e) { return null; }
     };
@@ -172,12 +180,7 @@ const App = (() => {
         state.sessionExpiry = expires;
     };
 
-    const clearSession = () => {
-        sessionStorage.removeItem(SESSION_KEY);
-        state.currentUser = null;
-        state.sessionExpiry = null;
-    };
-
+    const clearSession = () => { sessionStorage.removeItem(SESSION_KEY); state.currentUser = null; state.sessionExpiry = null; };
     const isSetup = () => state.users.length > 0;
     const isLoggedIn = () => {
         const s = getSession();
@@ -186,7 +189,6 @@ const App = (() => {
         return true;
     };
 
-    // --- CÁLCULOS ---
     const getMonthRange = (year, month) => {
         const start = new Date(year, month - 1, state.settings.monthStartDay || 1);
         const end = new Date(year, month, state.settings.monthStartDay || 1);
@@ -202,35 +204,25 @@ const App = (() => {
         }).sort((a, b) => new Date(b.date) - new Date(a.date));
     };
 
-    const getCurrentMonth = () => {
-        const d = new Date();
-        return { year: d.getFullYear(), month: d.getMonth() + 1 };
-    };
+    const getCurrentMonth = () => { const d = new Date(); return { year: d.getFullYear(), month: d.getMonth() + 1 }; };
 
     const getMonthTotals = (year, month) => {
         const txs = getTransactionsForMonth(year, month);
         const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
         const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
-
         return { income, expense, balance: income - expense, count: txs.length };
     };
 
     const getCategoryTotals = (year, month) => {
         const txs = getTransactionsForMonth(year, month);
         const map = {};
-
         txs.forEach(t => {
             if (!map[t.categoryId]) {
-                map[t.categoryId] = {
-                    amount: 0,
-                    count: 0,
-                    category: state.categories.find(c => c.id === t.categoryId) || { name: 'Outros', icon: '📋' }
-                };
+                map[t.categoryId] = { amount: 0, count: 0, category: state.categories.find(c => c.id === t.categoryId) || { name: 'Outros', icon: '📋' } };
             }
             map[t.categoryId].amount += Number(t.amount) || 0;
             map[t.categoryId].count++;
         });
-
         return Object.values(map).sort((a, b) => b.amount - a.amount);
     };
 
@@ -240,59 +232,38 @@ const App = (() => {
         return months;
     };
 
-    // --- AUTENTICAÇÃO ---
     const doSetup = async () => {
         try {
             const name = el('setupName')?.value.trim();
             const email = el('setupEmail')?.value.trim().toLowerCase();
             const pwd = el('setupPwd')?.value;
             const pwd2 = el('setupPwd2')?.value;
-
             if (!name || !email || !pwd) { showToast('Preencha todos os campos.', 'error'); return; }
-            if (pwd.length < 6) { showToast('A senha deve ter no mínimo 6 caracteres.', 'error'); return; }
-            if (pwd !== pwd2) { showToast('As senhas não coincidem.', 'error'); return; }
-
+            if (pwd.length < 6) { showToast('Senha mínima de 6 caracteres.', 'error'); return; }
+            if (pwd !== pwd2) { showToast('Senhas não coincidem.', 'error'); return; }
             const passwordHash = await hashPwd(pwd);
             const user = { id: generateId(), name, email, passwordHash, role: 'admin', createdAt: now() };
-
-            state.users = [user];
-            saveState();
-            setSession(user.id);
-            renderApp();
-            showToast('Conta principal criada!');
-        } catch (err) {
-            console.error(err);
-            showToast('Erro ao criar a conta.', 'error');
-        }
+            state.users = [user]; saveState(); setSession(user.id); renderApp(); showToast('Conta criada!');
+        } catch (err) { console.error(err); showToast('Erro ao criar conta.', 'error'); }
     };
 
     const doLogin = async () => {
         try {
             const email = el('loginEmail')?.value.trim().toLowerCase();
             const pwd = el('loginPwd')?.value;
-
             if (!email || !pwd) { showToast('Preencha e-mail e senha.', 'error'); return; }
             const user = state.users.find(u => String(u.email).toLowerCase() === email);
-
             if (!user) { showToast('Usuário ou senha inválidos.', 'error'); return; }
             const hash = await hashPwd(pwd);
             if (user.passwordHash !== hash) { showToast('Usuário ou senha inválidos.', 'error'); return; }
-
-            setSession(user.id);
-            renderApp();
-            showToast(`Bem-vindo(a), ${user.name}!`);
-        } catch (err) {
-            console.error(err);
-            showToast('Erro ao entrar.', 'error');
-        }
+            setSession(user.id); renderApp(); showToast(`Bem-vindo(a), ${user.name}!`);
+        } catch (err) { console.error(err); showToast('Erro ao entrar.', 'error'); }
     };
 
     const logout = () => { clearSession(); renderLogin(); };
 
-    // --- RENDERIZADORES DE TELA ---
     const renderLogin = () => {
-        const app = el('app');
-        app.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
+        el('app').innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
             <div style="background:#fff;border-radius:20px;padding:40px;max-width:420px;width:90%;box-shadow:0 25px 80px rgba(0,0,0,.3)">
                 <div style="text-align:center;margin-bottom:28px">
                     <div style="width:64px;height:64px;background:var(--navy);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">💶</div>
@@ -300,26 +271,17 @@ const App = (() => {
                     <p style="margin:8px 0 0;color:var(--text-light);font-size:14px">València 🇪🇸 & Brasil 🇧🇷</p>
                 </div>
                 <form id="loginForm" onsubmit="event.preventDefault(); App.doLogin();">
-                    <div class="form-group">
-                        <label class="form-label">Email</label>
-                        <input type="email" id="loginEmail" name="username" autocomplete="username" class="input-field" placeholder="seu@email.com" required>
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Senha</label>
-                        <input type="password" id="loginPwd" name="password" autocomplete="current-password" class="input-field" placeholder="Sua senha" required>
-                    </div>
+                    <div class="form-group"><label class="form-label">Email</label><input type="email" id="loginEmail" name="username" autocomplete="username" class="input-field" placeholder="seu@email.com" required></div>
+                    <div class="form-group"><label class="form-label">Senha</label><input type="password" id="loginPwd" name="password" autocomplete="current-password" class="input-field" placeholder="Sua senha" required></div>
                     <button type="submit" class="btn-primary" style="width:100%;padding:14px">Entrar</button>
                 </form>
-                <div style="text-align:center;margin-top:20px;display:flex;flex-direction:column;gap:10px">
-                    <button onclick="App.resetAllData()" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;text-decoration:underline">Redefinir Dados / Criar Conta do Zero</button>
-                </div>
+                <div style="text-align:center;margin-top:20px"><button onclick="App.resetAllData()" style="background:none;border:none;color:var(--danger);font-size:12px;cursor:pointer;text-decoration:underline">Redefinir Dados / Criar Conta do Zero</button></div>
             </div>
         </div>`;
     };
 
     const renderSetup = () => {
-        const app = el('app');
-        app.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
+        el('app').innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
             <div style="background:#fff;border-radius:20px;padding:40px;max-width:480px;width:90%;box-shadow:0 25px 80px rgba(0,0,0,.3)">
                 <div style="text-align:center;margin-bottom:28px">
                     <div style="width:64px;height:64px;background:var(--navy);border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px;font-size:32px">🔐</div>
@@ -338,8 +300,7 @@ const App = (() => {
     };
 
     const renderApp = () => {
-        const app = el('app');
-        app.innerHTML = `<div class="sidebar">
+        el('app').innerHTML = `<div class="sidebar">
             <div class="logo">
                 <div style="display:flex;align-items:center;gap:12px">
                     <div style="width:40px;height:40px;background:rgba(255,255,255,.15);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:20px">💶</div>
@@ -387,7 +348,10 @@ const App = (() => {
                 <h2 style="margin:0;font-size:22px;color:var(--navy)">Dashboard</h2>
                 <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Resumo financeiro - ${monthName}</p>
             </div>
-            <button class="btn-primary" onclick="App.showAddTransactionModal()">+ Novo Lançamento</button>
+            <div style="display:flex;gap:10px">
+                <button class="btn-primary" style="background:#0284c7" onclick="App.syncFromDrive()">🔄 Atualizar do Drive</button>
+                <button class="btn-primary" onclick="App.showAddTransactionModal()">+ Novo Lançamento</button>
+            </div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px">
             <div class="card stat-card"><div class="stat-label">Saldo do Mês</div><div class="stat-value ${totals.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(totals.balance, state.settings.currencyES)}</div></div>
@@ -488,9 +452,7 @@ const App = (() => {
 
     const renderTransactionsTable = () => {
         const txs = state.transactions.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-        if (txs.length === 0) {
-            return `<div class="empty-state"><p>Nenhum lançamento cadastrado.</p></div>`;
-        }
+        if (txs.length === 0) return `<div class="empty-state"><p>Nenhum lançamento cadastrado.</p></div>`;
         return `<div class="table-container">
             <table class="data-table">
                 <thead><tr><th>Data</th><th>Categoria</th><th>Descrição / Detalhe</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
@@ -504,7 +466,7 @@ const App = (() => {
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
             <div>
                 <h2 style="margin:0;font-size:22px;color:var(--navy)">Relatório Mensal</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Detalhamento das despesas e receitas por categoria</p>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Detalhamento por categoria</p>
             </div>
         </div>
         <div id="reportContent">${renderReportContent(year, month)}</div>`;
@@ -513,13 +475,10 @@ const App = (() => {
     const renderReportContent = (year, month) => {
         const catTotals = getCategoryTotals(year, month);
         const totals = getMonthTotals(year, month);
-
         return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:24px">
             <div class="card" style="padding:20px">
                 <h4 style="margin:0 0 12px;color:var(--text-light)">Resumo Financeiro</h4>
-                <div style="font-size:24px;font-weight:700;margin-bottom:8px" class="${totals.balance >= 0 ? 'emerald-text' : 'danger-text'}">
-                    ${fmtMoney(totals.balance, state.settings.currencyES)}
-                </div>
+                <div style="font-size:24px;font-weight:700;margin-bottom:8px" class="${totals.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(totals.balance, state.settings.currencyES)}</div>
                 <div style="font-size:13px;color:var(--text-light)">Entradas: <strong class="emerald-text">${fmtMoney(totals.income, state.settings.currencyES)}</strong> | Saídas: <strong class="danger-text">${fmtMoney(totals.expense, state.settings.currencyES)}</strong></div>
             </div>
         </div>
@@ -543,11 +502,19 @@ const App = (() => {
         return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
             <div>
                 <h2 style="margin:0;font-size:22px;color:var(--navy)">Configurações</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Gerencie acessos e preferências</p>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Conecte sua planilha do Google Drive</p>
             </div>
             <button class="btn-primary" onclick="App.showAddUserModal()">+ Adicionar Familiar</button>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:16px">
+            <div class="card" style="padding:24px">
+                <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📊 Sincronização Google Drive (Planilha)</h3>
+                <div class="form-group">
+                    <label class="form-label">URL do Web App do Google Apps Script</label>
+                    <input type="url" id="googleScriptUrl" class="input-field" value="${state.settings.googleScriptUrl || ''}" placeholder="https://script.google.com/macros/s/.../exec">
+                </div>
+                <button class="btn-primary" onclick="App.saveGoogleUrl()">Salvar Conexão do Drive</button>
+            </div>
             <div class="card" style="padding:24px">
                 <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">👥 Usuários Cadastrados</h3>
                 <div>${state.users.map(u => `
@@ -562,11 +529,15 @@ const App = (() => {
         </div>`;
     };
 
-    // --- MODAIS E AÇÕES DE EDIÇÃO ---
-    const closeModal = () => {
-        const overlay = el('modalOverlay');
-        if (overlay) overlay.classList.remove('active');
+    const saveGoogleUrl = () => {
+        const url = el('googleScriptUrl').value.trim();
+        state.settings.googleScriptUrl = url;
+        saveState();
+        showToast('Endereço da Planilha salvo com sucesso!');
+        if (url) syncFromDrive();
     };
+
+    const closeModal = () => { el('modalOverlay')?.classList.remove('active'); };
 
     const filterCategoriesByType = (type) => {
         const select = el('txCategory');
@@ -637,10 +608,7 @@ const App = (() => {
 
     const showEditTransactionModal = (id) => {
         const tx = state.transactions.find(t => t.id === id);
-        if (!tx) {
-            showToast('Lançamento não encontrado.', 'error');
-            return;
-        }
+        if (!tx) { showToast('Lançamento não encontrado.', 'error'); return; }
 
         const overlay = el('modalOverlay');
         const content = el('modalContent');
@@ -712,22 +680,14 @@ const App = (() => {
         if (!amount || amount <= 0) { showToast('Informe um valor válido.', 'error'); return; }
 
         state.transactions.push({
-            id: generateId(),
-            amount,
-            categoryId,
-            type,
-            country,
-            date,
-            assignedTo,
-            description,
-            userId: state.currentUser.id,
-            createdAt: now()
+            id: generateId(), amount, categoryId, type, country, date, assignedTo, description,
+            userId: state.currentUser.id, createdAt: now()
         });
 
         saveState();
+        syncToDrive();
         closeModal();
         renderApp();
-        showToast('Lançamento cadastrado com sucesso!');
     };
 
     const doUpdateTransaction = (id) => {
@@ -750,17 +710,17 @@ const App = (() => {
         };
 
         saveState();
+        syncToDrive();
         closeModal();
         renderApp();
-        showToast('Lançamento atualizado!');
     };
 
     const deleteTransaction = (id) => {
         if (confirm('Deseja realmente remover este lançamento?')) {
             state.transactions = state.transactions.filter(t => t.id !== id);
             saveState();
+            syncToDrive();
             renderApp();
-            showToast('Lançamento removido.');
         }
     };
 
@@ -789,7 +749,7 @@ const App = (() => {
         const email = el('newUserEmail').value.trim().toLowerCase();
         const pwd = el('newUserPwd').value;
 
-        if (state.users.some(u => u.email === email)) { showToast('Este e-mail já está cadastrado.', 'error'); return; }
+        if (state.users.some(u => u.email === email)) { showToast('E-mail já cadastrado.', 'error'); return; }
 
         const passwordHash = await hashPwd(pwd);
         state.users.push({ id: generateId(), name, email, passwordHash, role: 'user', createdAt: now() });
@@ -818,7 +778,8 @@ const App = (() => {
         doLogin, doSetup, logout, nav, resetAllData,
         showAddTransactionModal, showEditTransactionModal,
         doSaveTransaction, doUpdateTransaction, deleteTransaction,
-        showAddUserModal, doAddUser, closeModal, filterCategoriesByType
+        showAddUserModal, doAddUser, closeModal, filterCategoriesByType,
+        saveGoogleUrl, syncFromDrive
     };
 })();
 
