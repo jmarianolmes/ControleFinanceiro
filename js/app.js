@@ -1128,56 +1128,86 @@ const exportToCSV = () => {
     showToast(`✅ CSV exportado com sucesso! (${txs.length} registros)`);
 };
     
-   // ==================== EXPORTAÇÃO PDF ====================
+// ==================== EXPORTAÇÃO PDF ====================
 const exportToPDF = () => {
-    const content = document.getElementById('reportContainer');
-    if (!content) {
-        showToast('❌ Nenhum conteúdo para exportar.', 'error');
+    // ============================================================
+    // CORREÇÃO: Busca o conteúdo na página de relatórios
+    // ============================================================
+    const reportsPage = document.getElementById('reports');
+    if (!reportsPage) {
+        showToast('❌ Página de relatórios não encontrada.', 'error');
         return;
     }
     
-    // Verifica se há dados para exportar
-    const hasData = content.querySelector('table tbody tr');
+    // Pega o conteúdo principal (excluindo o card de botões)
+    const content = reportsPage.cloneNode(true);
+    
+    // Verifica se há dados
+    const hasData = content.querySelector('table tbody tr') || 
+                    content.querySelector('.data-table tbody tr') ||
+                    content.querySelectorAll('table tbody tr').length > 0;
+    
     if (!hasData) {
-        showToast('⚠️ Nenhum lançamento neste mês para exportar.', 'error');
-        return;
+        // Verifica se há transações no mês atual
+        const ym = state.selectedMonth;
+        const txs = state.transactions.filter(t => {
+            if (!t || !t.date) return false;
+            try {
+                const d = new Date(t.date);
+                return !isNaN(d.getTime()) && d.toISOString().slice(0, 7) === ym;
+            } catch (e) { return false; }
+        });
+        
+        if (txs.length === 0) {
+            showToast('⚠️ Nenhum lançamento neste mês para exportar.', 'error');
+            return;
+        }
     }
     
     showToast('🔄 Gerando PDF...', 'info');
     
-    // Cria um clone do conteúdo para o PDF
-    const clone = content.cloneNode(true);
+    // ============================================================
+    // REMOVE ELEMENTOS QUE NÃO DEVEM APARECER NO PDF
+    // ============================================================
+    content.querySelectorAll('.no-print, button, select, .btn-primary').forEach(el => el.remove());
     
-    // Remove botões do clone
-    clone.querySelectorAll('.no-print, button, select').forEach(el => el.remove());
+    // Remove o card que contém os botões (o primeiro card com .no-print)
+    const firstCard = content.querySelector('.card.no-print');
+    if (firstCard) firstCard.remove();
     
-    // Cria o wrapper com cabeçalho
+    // ============================================================
+    // CRIA O WRAPPER COM CABEÇALHO
+    // ============================================================
     const wrapper = document.createElement('div');
     wrapper.style.padding = '20px';
     wrapper.style.fontFamily = 'Arial, sans-serif';
+    wrapper.style.background = '#ffffff';
+    wrapper.style.color = '#000000';
     
     const ym = state.selectedMonth;
     const [year, month] = ym.split('-');
     const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+    
+    // Conta o total de registros
+    const totalRows = content.querySelectorAll('table tbody tr').length || 0;
     
     wrapper.innerHTML = `
         <div style="text-align:center;margin-bottom:30px;padding-bottom:20px;border-bottom:3px solid #1e3a5f;">
             <h1 style="font-size:24px;margin:0;color:#1e3a5f;">📊 Relatório Financeiro FinFam</h1>
             <h2 style="font-size:18px;margin:5px 0;color:#2c5282;">${monthName}</h2>
             <p style="color:#64748b;margin:5px 0 0;">Controle Financeiro Familiar</p>
-            <p style="color:#64748b;font-size:12px;margin-top:5px;">Gerado em: ${new Date().toLocaleDateString('pt-BR')}</p>
+            <p style="color:#64748b;font-size:12px;margin-top:5px;">
+                ${totalRows} lançamentos | Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}
+            </p>
         </div>
     `;
     
-    // Adiciona o clone (sem os cabeçalhos que já estão no wrapper)
-    const cloneContent = clone.cloneNode(true);
-    // Remove o primeiro card (que tem os botões)
-    const firstCard = cloneContent.querySelector('.card.no-print');
-    if (firstCard) firstCard.remove();
+    // Adiciona o conteúdo limpo
+    wrapper.appendChild(content);
     
-    wrapper.appendChild(cloneContent);
-    
-    // Configuração do PDF
+    // ============================================================
+    // CONFIGURAÇÃO DO PDF
+    // ============================================================
     const opt = {
         margin: [10, 10, 10, 10],
         filename: `Relatorio_FinFam_${ym}.pdf`,
@@ -1186,28 +1216,32 @@ const exportToPDF = () => {
             scale: 2, 
             useCORS: true,
             logging: false,
-            letterRendering: true
+            letterRendering: true,
+            backgroundColor: '#ffffff'
         },
         jsPDF: { 
             unit: 'mm', 
             format: 'a4', 
             orientation: 'portrait' 
-        },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+        }
     };
     
+    // ============================================================
+    // GERA O PDF
+    // ============================================================
     html2pdf()
         .set(opt)
         .from(wrapper)
         .save()
         .then(() => {
-            showToast('✅ PDF gerado com sucesso!');
+            showToast(`✅ PDF gerado com sucesso! (${totalRows} registros)`);
         })
         .catch((err) => {
             console.error('Erro PDF:', err);
             showToast('❌ Erro ao gerar PDF. Tente novamente.', 'error');
         });
 };
+    
     // ==================== CONFIGURAÇÕES ====================
     const renderSettings = () => {
         return `
