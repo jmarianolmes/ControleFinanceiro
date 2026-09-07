@@ -1130,50 +1130,55 @@ const exportToCSV = () => {
     
 // ==================== EXPORTAÇÃO PDF ====================
 const exportToPDF = () => {
-    // ============================================================
-    // CORREÇÃO: Busca o conteúdo na página de relatórios
-    // ============================================================
+    // Busca a página de relatórios
     const reportsPage = document.getElementById('reports');
     if (!reportsPage) {
         showToast('❌ Página de relatórios não encontrada.', 'error');
         return;
     }
     
-    // Pega o conteúdo principal (excluindo o card de botões)
-    const content = reportsPage.cloneNode(true);
-    
-    // Verifica se há dados
-    const hasData = content.querySelector('table tbody tr') || 
-                    content.querySelector('.data-table tbody tr') ||
-                    content.querySelectorAll('table tbody tr').length > 0;
-    
-    if (!hasData) {
-        // Verifica se há transações no mês atual
-        const ym = state.selectedMonth;
-        const txs = state.transactions.filter(t => {
-            if (!t || !t.date) return false;
-            try {
-                const d = new Date(t.date);
-                return !isNaN(d.getTime()) && d.toISOString().slice(0, 7) === ym;
-            } catch (e) { return false; }
-        });
-        
-        if (txs.length === 0) {
-            showToast('⚠️ Nenhum lançamento neste mês para exportar.', 'error');
-            return;
-        }
-    }
-    
     showToast('🔄 Gerando PDF...', 'info');
+    
+    // ============================================================
+    // CLONA O CONTEÚDO COMPLETO DA PÁGINA
+    // ============================================================
+    const content = reportsPage.cloneNode(true);
     
     // ============================================================
     // REMOVE ELEMENTOS QUE NÃO DEVEM APARECER NO PDF
     // ============================================================
     content.querySelectorAll('.no-print, button, select, .btn-primary').forEach(el => el.remove());
     
-    // Remove o card que contém os botões (o primeiro card com .no-print)
+    // Remove o card que contém os botões
     const firstCard = content.querySelector('.card.no-print');
     if (firstCard) firstCard.remove();
+    
+    // ============================================================
+    // VERIFICA SE HÁ DADOS NA TABELA
+    // ============================================================
+    const hasData = content.querySelector('table tbody tr');
+    const totalRows = content.querySelectorAll('table tbody tr').length || 0;
+    
+    // Se não houver dados, adiciona uma mensagem amigável
+    if (!hasData) {
+        const emptyMessage = document.createElement('div');
+        emptyMessage.style.textAlign = 'center';
+        emptyMessage.style.padding = '40px 20px';
+        emptyMessage.style.color = '#64748b';
+        emptyMessage.style.fontSize = '16px';
+        emptyMessage.innerHTML = `
+            <p style="font-size:18px;margin-bottom:10px;">📭 Nenhum lançamento encontrado</p>
+            <p style="font-size:14px;">Para este mês não há registros financeiros.</p>
+            <p style="font-size:12px;margin-top:10px;color:#94a3b8;">Adicione lançamentos no Dashboard para vê-los aqui.</p>
+        `;
+        
+        // Encontra o card que contém a tabela e substitui pelo aviso
+        const tableCard = content.querySelector('.card:last-child');
+        if (tableCard) {
+            tableCard.innerHTML = '';
+            tableCard.appendChild(emptyMessage);
+        }
+    }
     
     // ============================================================
     // CRIA O WRAPPER COM CABEÇALHO
@@ -1188,16 +1193,13 @@ const exportToPDF = () => {
     const [year, month] = ym.split('-');
     const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
     
-    // Conta o total de registros
-    const totalRows = content.querySelectorAll('table tbody tr').length || 0;
-    
     wrapper.innerHTML = `
         <div style="text-align:center;margin-bottom:30px;padding-bottom:20px;border-bottom:3px solid #1e3a5f;">
             <h1 style="font-size:24px;margin:0;color:#1e3a5f;">📊 Relatório Financeiro FinFam</h1>
             <h2 style="font-size:18px;margin:5px 0;color:#2c5282;">${monthName}</h2>
             <p style="color:#64748b;margin:5px 0 0;">Controle Financeiro Familiar</p>
             <p style="color:#64748b;font-size:12px;margin-top:5px;">
-                ${totalRows} lançamentos | Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}
+                ${totalRows} lançamento${totalRows !== 1 ? 's' : ''} | Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}
             </p>
         </div>
     `;
@@ -1227,7 +1229,7 @@ const exportToPDF = () => {
     };
     
     // ============================================================
-    // GERA O PDF
+    // GERA O PDF (SEMPRE, MESMO SEM DADOS)
     // ============================================================
     html2pdf()
         .set(opt)
