@@ -3,11 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Controle Financeiro Familiar</title>
+    <title>FinFam - Controle Financeiro Familiar</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
+        /* ============================================
+           TODOS OS ESTILOS AQUI (como estavam no original)
+           ============================================ */
         :root {
             --navy: #1e3a5f;
             --navy-light: #2c5282;
@@ -22,6 +26,7 @@
             --text: #1e293b;
             --text-light: #475569;
             --border: #e2e8f0;
+            --purple: #8b5cf6;
         }
 
         * {
@@ -96,6 +101,10 @@
             transition: all .2s;
         }
 
+        .btn-danger:hover {
+            background: #b91c1c;
+        }
+
         .input-field {
             width: 100%;
             padding: 10px 14px;
@@ -122,6 +131,7 @@
             color: #fff;
             display: flex;
             flex-direction: column;
+            z-index: 100;
         }
 
         .sidebar .logo {
@@ -139,6 +149,10 @@
             font-size: 14px;
             font-weight: 500;
             color: rgba(255, 255, 255, .8);
+            border: none;
+            background: none;
+            width: 100%;
+            text-align: left;
         }
 
         .sidebar .nav-item:hover,
@@ -171,12 +185,14 @@
             border-radius: 20px;
             font-size: 12px;
             font-weight: 600;
+            display: inline-block;
         }
 
         .badge-success { background: #d1fae5; color: var(--emerald); }
         .badge-danger { background: #fee2e2; color: var(--danger); }
         .badge-warning { background: #fef3c7; color: var(--warning); }
         .badge-info { background: #dbeafe; color: var(--navy-light); }
+        .badge-purple { background: #ede9fe; color: var(--purple); }
 
         .table-container { overflow-x: auto; }
 
@@ -211,7 +227,7 @@
             display: none;
             align-items: center;
             justify-content: center;
-            z-index: 1000;
+            z-index: 9999;
         }
 
         .modal-overlay.active { display: flex; }
@@ -261,78 +277,10 @@
             margin-bottom: 6px;
         }
 
-        .tabs {
-            display: flex;
-            gap: 4px;
-            border-bottom: 2px solid var(--border);
-            margin-bottom: 20px;
-        }
-
-        .tab {
-            padding: 10px 16px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            color: var(--text-light);
-            border-bottom: 2px solid transparent;
-            margin-bottom: -2px;
-            transition: all .2s;
-        }
-
-        .tab.active {
-            color: var(--navy);
-            border-bottom-color: var(--navy);
-        }
-
-        .tab:hover { color: var(--navy); }
-
-        .chart-container {
-            position: relative;
-            height: 300px;
-        }
-
-        .progress-bar {
-            height: 8px;
-            background: var(--border);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .progress-bar-fill {
-            height: 100%;
-            border-radius: 4px;
-            transition: width .5s ease;
-        }
-
-        .pin-input {
-            width: 50px;
-            height: 60px;
-            text-align: center;
-            font-size: 24px;
-            font-weight: 700;
-            border: 2px solid var(--border);
-            border-radius: 10px;
-            margin: 0 4px;
-            transition: all .2s;
-        }
-
-        .pin-input:focus {
-            outline: none;
-            border-color: var(--navy);
-            box-shadow: 0 0 0 3px rgba(30, 58, 95, .15);
-        }
-
         .empty-state {
             text-align: center;
             padding: 60px 20px;
             color: var(--text-light);
-        }
-
-        .empty-state svg {
-            width: 80px;
-            height: 80px;
-            margin-bottom: 16px;
-            opacity: .4;
         }
 
         .toast {
@@ -348,6 +296,7 @@
             opacity: 0;
             transition: all .3s;
             z-index: 2000;
+            max-width: 400px;
         }
 
         .toast.show {
@@ -372,16 +321,6 @@
             font-size: 14px;
         }
 
-        .sync-status {
-            font-size: 12px;
-            color: var(--slate-light);
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .sync-status.online { color: var(--emerald); }
-
         .category-tag {
             display: inline-flex;
             align-items: center;
@@ -394,16 +333,15 @@
             color: var(--text-light);
         }
 
-        .filter-bar {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            align-items: center;
-            margin-bottom: 20px;
-            padding: 16px;
-            background: #f8fafc;
-            border-radius: 10px;
-            border: 1px solid var(--border);
+        .net-worth-card {
+            background: linear-gradient(135deg, #fffbeb 0%, #fff 100%);
+            border-left: 4px solid #f59e0b;
+        }
+
+        .net-worth-value {
+            font-size: 32px;
+            font-weight: 800;
+            color: #d97706;
         }
 
         @media(max-width:768px) {
@@ -415,14 +353,11 @@
                 overflow-x: auto;
             }
             .sidebar .logo { display: none; }
+            .sidebar .nav-item { padding: 12px 16px; font-size: 13px; white-space: nowrap; }
             .main-content { margin-left: 0; padding: 16px; }
             .modal { padding: 20px; }
-            .pin-input { width: 44px; height: 52px; font-size: 20px; }
         }
 
-        /* ==========================================
-           ESTILOS DE IMPRESSÃO PDF E FORMATAÇÃO LIMPA
-           ========================================== */
         @media print {
             .sidebar, 
             .no-print, 
