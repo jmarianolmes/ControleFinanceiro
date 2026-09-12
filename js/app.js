@@ -1383,24 +1383,99 @@ const App = (() => {
         html2pdf().set(opt).from(element).save();
     };
 
-    const exportToCSV = () => {
-        const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
-        const txs = state.transactions.filter(t => t.date && t.date.startsWith(selMonth));
-        if (txs.length === 0) {
-            showToast('⚠️ Nenhuma transação para exportar neste mês.', 'error');
-            return;
-        }
-        let csv = 'Data;Tipo;Categoria;Descricao;Responsavel;Pais;Valor\n';
-        txs.forEach(t => {
-            const cat = state.categories.find(c => c.id === t.categoryId);
-            csv += `"${t.date}";"${t.type}";"${cat ? cat.name : ''}";"${t.description}";"${t.assignedTo}";"${t.country}";"${t.amount}"\n`;
-        });
-        const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `FinFam_${selMonth}.csv`;
-        link.click();
+    // ==================== EXPORTAÇÃO EXCEL / CSV ORGANIZADO ====================
+const exportToCSV = () => {
+    const ym = state.selectedMonth || new Date().toISOString().slice(0, 7);
+
+    // Normalização segura da data para o mês selecionado
+    const getYearMonth = (dateStr) => {
+        if (!dateStr) return '';
+        const s = String(dateStr).trim();
+        if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 7);
+        const brMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (brMatch) return `${brMatch[3]}-${brMatch[2].padStart(2, '0')}`;
+        try {
+            const d = new Date(s);
+            if (!isNaN(d.getTime())) return d.toISOString().slice(0, 7);
+        } catch (e) {}
+        return '';
     };
+
+    const txs = (state.transactions || []).filter(t => {
+        if (!t || !t.date) return false;
+        return getYearMonth(t.date) === ym;
+    }).sort((a, b) => (b.date > a.date ? 1 : -1));
+
+    if (!txs.length) { 
+        showToast('⚠️ Nenhum lançamento encontrado para exportar neste mês.', 'error'); 
+        return; 
+    }
+
+    const [ano, mes] = ym.split('-');
+    const nomeMes = new Date(parseInt(ano), parseInt(mes) - 1, 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+
+    // Cálculos de Totais
+    const recES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'income')
+                     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    const expES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'expense')
+                     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    const invES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'investment')
+                     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    const saldoES = recES - expES - invES;
+
+    const recBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'income')
+                     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    const expBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'expense')
+                     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+    const saldoBR = recBR - expBR;
+
+    // Início da montagem do conteúdo (com instrução sep=; para o Excel)
+    let csv = 'sep=;\n';
+
+    // 1. CABEÇALHO DO RELATÓRIO
+    csv += `RELATÓRIO FINANCEIRO FAMILIAR - FINFAM;;;;;\n`;
+    csv += `Período:;${nomeMes.toUpperCase()};;;;\n`;
+    csv += `Total de Lançamentos:;${txs.length};;;;\n\n`;
+
+    // 2. RESUMO EXECUTIVO (CONSOLIDADO)
+    csv += `--- RESUMO FINANCEIRO ---;;;;;\n`;
+    csv += `Espanha (EUR);Receitas:;€ ${recES.toFixed(2).replace('.', ',')};Despesas:;€ ${expES.toFixed(2).replace('.', ',')};Saldo:;€ ${saldoES.toFixed(2).replace('.', ',')}\n`;
+    csv += `Brasil (BRL);Receitas:;R$ ${recBR.toFixed(2).replace('.', ',')};Despesas:;R$ ${expBR.toFixed(2).replace('.', ',')};Saldo:;R$ ${saldoBR.toFixed(2).replace('.', ',')}\n\n`;
+
+    // 3. TABELA DE DETALHAMENTO
+    csv += `--- DETALHAMENTO DAS MOVIMENTAÇÕES ---;;;;;\n`;
+    csv += `Data;Tipo;País;Categoria;Descrição;Responsável;Moeda;Valor Numérico\n`;
+
+    txs.forEach(t => {
+        const cat = (state.categories || []).find(c => c.id === t.categoryId)?.name || 'Geral';
+        const typeStr = (t.type || '').toLowerCase();
+        const tipo = typeStr === 'income' ? 'Receita' : typeStr === 'investment' ? 'Investimento' : 'Despesa';
+        const pais = (t.country || 'ES').toUpperCase();
+        const moeda = pais === 'BR' ? 'BRL' : 'EUR';
+        
+        // Número com sinal correto e formatado com vírgula para fórmulas do Excel
+        const numValor = Number(t.amount || 0);
+        const valorFormatado = (typeStr === 'expense' ? -numValor : numValor).toFixed(2).replace('.', ',');
+        
+        // Tratamento de aspas e textos limpos
+        const desc = (t.description || '-').replace(/;/g, ',');
+        const resp = (t.assignedTo || 'Casal').replace(/;/g, ',');
+
+        csv += `${fmtDate(t.date)};${tipo};${pais};${cat};${desc};${resp};${moeda};${valorFormatado}\n`;
+    });
+
+    // Gera arquivo com BOM UTF-8 (mantém acentos como 'Salário', 'Mês', 'Espanha' intactos)
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `FinFam_Relatorio_${ym}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+
+    showToast(`✅ Arquivo Excel gerado com sucesso! (${txs.length} registros)`);
+};
 
     // ==================== RENDER APP ====================
     const renderApp = () => {
