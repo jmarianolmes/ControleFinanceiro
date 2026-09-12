@@ -1,11 +1,10 @@
 // ============================================================
 // FinFam — Controle Financeiro Familiar
 // Arquivo: js/app.js
-// Versão: 4.0 (sanitização defensiva + PDF robusto + aporte/resgate)
+// Versão: 4.2 — completa, sem dependências quebradas
 // ============================================================
 
 const App = (() => {
-    // ==================== CONSTANTES ====================
     const STORAGE_KEY   = 'finfam_data_v2';
     const SESSION_KEY   = 'finfam_session';
     const DEFAULT_TOKEN = 'FinFam_SecureToken_2026_@Key';
@@ -34,7 +33,9 @@ const App = (() => {
 
     const el = (id) => document.getElementById(id);
 
-    // ==================== CATEGORIAS PADRÃO ====================
+    // ============================================================
+    // CATEGORIAS
+    // ============================================================
     const defaultCategories = [
         { id: 'cat_salario_es',         name: 'Salário / Emprego',           type: 'income',     country: 'ES', icon: '💼' },
         { id: 'cat_freelance_es',       name: 'Trabalho Freelance / Extras', type: 'income',     country: 'ES', icon: '💻' },
@@ -56,7 +57,9 @@ const App = (() => {
         { id: 'cat_outros_br',          name: 'Compromissos Diversos',       type: 'expense',    country: 'BR', icon: '🇧🇷' }
     ];
 
-    // ==================== UTILITÁRIOS ====================
+    // ============================================================
+    // UTILITÁRIOS
+    // ============================================================
     const parseDateToYMD = (val) => {
         if (!val) return '';
         const s = String(val).trim();
@@ -90,8 +93,8 @@ const App = (() => {
         if (!d) return '-';
         const ymd = parseDateToYMD(d);
         if (ymd && ymd.length >= 10) {
-            const [y,m,dd] = ymd.split('-');
-            return `${dd}/${m}/${y}`;
+            const parts = ymd.split('-');
+            return `${parts[2]}/${parts[1]}/${parts[0]}`;
         }
         return String(d);
     };
@@ -105,64 +108,66 @@ const App = (() => {
 
     const hashPwd = async (value) => {
         try {
-            if (window.crypto?.subtle) {
-                const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+            if (window.crypto && window.crypto.subtle) {
+                const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(value)));
                 return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
             }
         } catch(e) {}
         let h = 2166136261;
-        for (let i = 0; i < value.length; i++) { h ^= value.charCodeAt(i); h = Math.imul(h, 16777619); }
+        const s = String(value);
+        for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
         return (h >>> 0).toString(16);
     };
 
     const generateId = () => Date.now().toString(36) + Math.random().toString(36).slice(2,11);
 
     const showToast = (msg, type = 'success') => {
-        const t = el('toast');
-        if (!t) return;
-        t.textContent = String(msg);
-        t.className = `toast ${type} show`;
-        clearTimeout(t._timeout);
-        t._timeout = setTimeout(() => t.classList.remove('show'), 3500);
+        try {
+            const t = el('toast');
+            if (!t) return;
+            t.textContent = String(msg);
+            t.className = 'toast ' + type + ' show';
+            clearTimeout(t._timeout);
+            t._timeout = setTimeout(() => t.classList.remove('show'), 3500);
+        } catch(e) { console.warn('toast error:', e); }
     };
 
     // ============================================================
-    // SANITIZAÇÃO — previne "BR BR", "🇧🇷 BR", valores inválidos
+    // SANITIZAÇÕES
     // ============================================================
     const sanitizeCountry = (raw) => {
-        if (!raw) return 'ES';
+        if (raw === null || raw === undefined) return 'ES';
         const s = String(raw).toUpperCase();
-        // Pega as duas letras "BR" ou "ES" em qualquer posição da string
-        if (s.includes('BR') || s.includes('BRA')) return 'BR';
-        if (s.includes('ES') || s.includes('ESP')) return 'ES';
+        if (s.indexOf('BR') !== -1 || s.indexOf('BRA') !== -1) return 'BR';
+        if (s.indexOf('ES') !== -1 || s.indexOf('ESP') !== -1) return 'ES';
         return 'ES';
     };
 
     const sanitizeType = (raw) => {
         const s = String(raw || '').toLowerCase();
-        if (s.includes('income') || s.includes('receita'))  return 'income';
-        if (s.includes('invest'))                            return 'investment';
+        if (s.indexOf('income') !== -1 || s.indexOf('receita') !== -1) return 'income';
+        if (s.indexOf('invest') !== -1) return 'investment';
         return 'expense';
     };
 
     const sanitizeAmount = (raw) => {
         if (raw === null || raw === undefined) return 0;
         if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
-        // Aceita "1.234,56" ou "1234.56" ou "1,234.56"
+
         let s = String(raw).trim();
         if (!s) return 0;
-        // Remove símbolos de moeda
-        s = s.replace(/[€R$\s]/g, '');
-        // Se tem vírgula e ponto: assume "1.234,56" (pt-BR)
-        if (s.includes(',') && s.includes('.')) {
+        s = s.replace(/[^0-9.,-]/g, '');
+
+        if (s.indexOf(',') !== -1 && s.indexOf('.') !== -1) {
             if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
                 s = s.replace(/\./g, '').replace(',', '.');
             } else {
                 s = s.replace(/,/g, '');
             }
-        } else if (s.includes(',')) {
+        } else if (s.indexOf(',') !== -1) {
             s = s.replace(',', '.');
         }
+
         const n = parseFloat(s);
         return Number.isFinite(n) ? n : 0;
     };
@@ -173,58 +178,94 @@ const App = (() => {
     };
 
     // ============================================================
-    // NORMALIZAÇÃO DE TRANSAÇÃO
+    // CATEGORIAS — FUNÇÕES QUE ESTAVAM FALTANDO
+    // ============================================================
+    const getCategoryDisplay = (categoryId) => {
+        const c = (state.categories || []).find(x => x && x.id === categoryId);
+        if (!c) return { name: 'Geral', icon: '📋' };
+        const clean = String(c.name || '')
+            .replace(/\s*\((espanha|es|brasil|br)\)\s*/gi, '')
+            .replace(/\s*-\s*(espanha|es|brasil|br)\s*$/gi, '')
+            .trim();
+        return { name: clean || 'Geral', icon: c.icon || '📋' };
+    };
+
+    const getInvestmentCategory = () =>
+        (state.categories || []).find(c => c && c.id === 'cat_invest') ||
+        (state.categories || []).find(c => c && c.type === 'investment') ||
+        (state.categories || [])[0] ||
+        { id: 'cat_invest', name: 'Investimentos', icon: '📈' };
+
+    const getResponsibleOptions = (selected) => {
+        const names = new Set(['Casal / Ambos']);
+        (state.users || []).forEach(u => { if (u && u.name) names.add(u.name); });
+        if (selected && selected !== 'Casal' && selected !== 'Casal / Ambos') names.add(selected);
+        return Array.from(names)
+            .map(n => `<option value="${n}" ${selected === n ? 'selected' : ''}>${n}</option>`)
+            .join('');
+    };
+
+    // ============================================================
+    // NORMALIZAÇÃO
     // ============================================================
     const normalizeTx = (t) => {
         if (!t || typeof t !== 'object') return null;
+        try {
+            const rawDate = t.date || t.Data || '';
+            const ymd = parseDateToYMD(rawDate) || new Date().toISOString().slice(0,10);
+            const type = sanitizeType(t.type || t.Tipo);
+            const isInv = type === 'investment';
 
-        const rawDate = t.date || t.Data || '';
-        const ymd = parseDateToYMD(rawDate) || new Date().toISOString().slice(0,10);
-        const type = sanitizeType(t.type || t.Tipo);
-        const isInv = type === 'investment';
-
-        return {
-            id:           String(t.id || t.ID || ('tx_' + generateId())),
-            type:         type,
-            date:         ymd,
-            description:  String(t.description || t['Descrição'] || '').trim(),
-            categoryId:   String(t.categoryId || t.CategoriaID || (isInv ? 'cat_invest' : 'cat_outros_es')),
-            country:      sanitizeCountry(t.country || t['País']),
-            amount:       sanitizeAmount(t.amount ?? t.Valor),
-            assignedTo:   String(t.assignedTo || t['Responsável'] || 'Casal / Ambos').trim(),
-            investAction: isInv ? sanitizeInvestAction(t.investAction || t.action) : undefined,
-            createdAt:    t.createdAt || new Date().toISOString(),
-            updatedAt:    t.updatedAt || t.createdAt || new Date().toISOString()
-        };
+            return {
+                id:           String(t.id || t.ID || ('tx_' + generateId())),
+                type:         type,
+                date:         ymd,
+                description:  String(t.description || t['Descrição'] || '').trim(),
+                categoryId:   String(t.categoryId || t.CategoriaID || (isInv ? 'cat_invest' : 'cat_outros_es')),
+                country:      sanitizeCountry(t.country || t['País']),
+                amount:       sanitizeAmount(t.amount !== undefined && t.amount !== null ? t.amount : t.Valor),
+                assignedTo:   String(t.assignedTo || t['Responsável'] || 'Casal / Ambos').trim(),
+                investAction: isInv ? sanitizeInvestAction(t.investAction || t.action) : undefined,
+                createdAt:    t.createdAt || new Date().toISOString(),
+                updatedAt:    t.updatedAt || t.createdAt || new Date().toISOString()
+            };
+        } catch(e) {
+            console.warn('normalizeTx falhou:', t, e);
+            return null;
+        }
     };
 
-    // Prepara transação para envio ao Drive — remove undefined, força tipos primitivos
     const sanitizeTxForDrive = (tx) => {
-        const out = {
-            id:          String(tx.id || ''),
-            type:        String(tx.type || 'expense'),
-            date:        String(tx.date || ''),
-            description: String(tx.description || ''),
-            categoryId:  String(tx.categoryId || ''),
-            country:     String(tx.country || 'ES'),
-            amount:      Number(tx.amount) || 0,
-            assignedTo:  String(tx.assignedTo || 'Casal / Ambos'),
-            createdAt:   String(tx.createdAt || new Date().toISOString()),
-            updatedAt:   String(tx.updatedAt || new Date().toISOString())
-        };
-        if (tx.type === 'investment') {
-            out.investAction = String(tx.investAction || 'aporte');
+        if (!tx || typeof tx !== 'object') return null;
+        try {
+            const out = {
+                id:          String(tx.id || ''),
+                type:        String(tx.type || 'expense'),
+                date:        String(tx.date || ''),
+                description: String(tx.description || ''),
+                categoryId:  String(tx.categoryId || ''),
+                country:     String(tx.country || 'ES'),
+                amount:      Number(tx.amount) || 0,
+                assignedTo:  String(tx.assignedTo || 'Casal / Ambos'),
+                createdAt:   String(tx.createdAt || new Date().toISOString()),
+                updatedAt:   String(tx.updatedAt || new Date().toISOString())
+            };
+            if (tx.type === 'investment') out.investAction = String(tx.investAction || 'aporte');
+            if (!out.id || !out.date) return null;
+            return out;
+        } catch(e) {
+            console.warn('sanitizeTxForDrive falhou:', tx, e);
+            return null;
         }
-        return out;
     };
 
     // ============================================================
-    // AUTH
+    // SESSÃO
     // ============================================================
     const getSession = () => {
-        const raw = sessionStorage.getItem(SESSION_KEY);
-        if (!raw) return null;
         try {
+            const raw = sessionStorage.getItem(SESSION_KEY);
+            if (!raw) return null;
             const s = JSON.parse(raw);
             if (new Date(s.expires) < new Date()) {
                 sessionStorage.removeItem(SESSION_KEY);
@@ -248,7 +289,7 @@ const App = (() => {
         state.sessionExpiry = null;
     };
 
-    const isSetup = () => state.users && state.users.length > 0;
+    const isSetup = () => Array.isArray(state.users) && state.users.length > 0;
 
     const isLoggedIn = () => {
         const s = getSession();
@@ -271,31 +312,31 @@ const App = (() => {
     // ESTADO
     // ============================================================
     const initState = () => {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-            try {
-                const parsed = JSON.parse(raw);
-                state = { ...state, ...parsed };
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) { resetState(); return; }
 
-                // SEMPRE normaliza transações vindas do storage
-                const rawTxs = Array.isArray(state.transactions) ? state.transactions : [];
-                state.transactions = rawTxs.map(normalizeTx).filter(Boolean);
+            let parsed;
+            try { parsed = JSON.parse(raw); }
+            catch(e) { console.warn('JSON corrompido, recriando...', e); resetState(); return; }
 
-                state.categories = [...defaultCategories];
-                if (!state.selectedMonth) state.selectedMonth = new Date().toISOString().slice(0,7);
-                if (!state.settings) {
-                    state.settings = {
-                        currencyBR: 'R$', currencyES: '€', monthStartDay: 1,
-                        googleScriptUrl: '', apiToken: DEFAULT_TOKEN
-                    };
-                }
-                if (!state.settings.apiToken) state.settings.apiToken = DEFAULT_TOKEN;
-                if (!Array.isArray(state.users)) state.users = [];
-            } catch(e) {
-                console.error('initState parse error:', e);
-                resetState();
-            }
-        } else {
+            if (!parsed || typeof parsed !== 'object') { resetState(); return; }
+
+            state.users         = Array.isArray(parsed.users) ? parsed.users.filter(u => u && u.email) : [];
+            state.privacyMode   = !!parsed.privacyMode;
+            state.selectedMonth = parsed.selectedMonth || new Date().toISOString().slice(0,7);
+            state.settings = Object.assign({
+                currencyBR: 'R$', currencyES: '€', monthStartDay: 1,
+                googleScriptUrl: '', apiToken: DEFAULT_TOKEN
+            }, parsed.settings || {});
+            if (!state.settings.apiToken) state.settings.apiToken = DEFAULT_TOKEN;
+
+            const rawTxs = Array.isArray(parsed.transactions) ? parsed.transactions : [];
+            state.transactions = rawTxs.map(normalizeTx).filter(Boolean);
+
+            state.categories = defaultCategories.slice();
+        } catch(e) {
+            console.error('initState falhou. Resetando:', e);
             resetState();
         }
     };
@@ -304,7 +345,7 @@ const App = (() => {
         state = {
             users: [],
             transactions: [],
-            categories: [...defaultCategories],
+            categories: defaultCategories.slice(),
             settings: {
                 currencyBR: 'R$', currencyES: '€', monthStartDay: 1,
                 googleScriptUrl: '', apiToken: DEFAULT_TOKEN
@@ -318,57 +359,58 @@ const App = (() => {
     };
 
     const saveState = () => {
-        const toSave = {
-            users: state.users,
-            transactions: state.transactions.map(sanitizeTxForDrive),
-            settings: state.settings,
-            privacyMode: state.privacyMode,
-            selectedMonth: state.selectedMonth
-        };
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
-        } catch(e) {
-            console.error('saveState error:', e);
-        }
+            const cleanTx = (state.transactions || []).map(sanitizeTxForDrive).filter(Boolean);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                users: Array.isArray(state.users) ? state.users : [],
+                transactions: cleanTx,
+                settings: state.settings || {},
+                privacyMode: !!state.privacyMode,
+                selectedMonth: state.selectedMonth || new Date().toISOString().slice(0,7)
+            }));
+        } catch(e) { console.error('saveState falhou:', e); }
     };
 
     // ============================================================
-    // OVERLAY DE CONEXÃO
+    // OVERLAY
     // ============================================================
     const showConnectionOverlay = () => {
-        if (el('connOverlay')) return;
-        const ov = document.createElement('div');
-        ov.id = 'connOverlay';
-        ov.style.cssText = 'position:fixed;inset:0;background:rgba(255,255,255,.96);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;';
-        ov.innerHTML = `
-            <div style="font-size:38px;">💶</div>
-            <div style="font-weight:700;font-size:16px;color:#1e3a5f;">Conectando com o banco de dados...</div>
-            <div style="width:260px;height:10px;background:#e2e8f0;border-radius:6px;overflow:hidden;">
-                <div id="connBar" style="width:15%;height:100%;background:#059669;border-radius:6px;transition:width .3s;"></div>
-            </div>
-            <div id="connPct" style="font-size:13px;color:#64748b;font-weight:600;">15%</div>
-        `;
-        document.body.appendChild(ov);
+        try {
+            if (el('connOverlay')) return;
+            const ov = document.createElement('div');
+            ov.id = 'connOverlay';
+            ov.style.cssText = 'position:fixed;inset:0;background:rgba(255,255,255,.96);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;';
+            ov.innerHTML =
+                '<div style="font-size:38px;">💶</div>' +
+                '<div style="font-weight:700;font-size:16px;color:#1e3a5f;">Conectando com o banco de dados...</div>' +
+                '<div style="width:260px;height:10px;background:#e2e8f0;border-radius:6px;overflow:hidden;">' +
+                  '<div id="connBar" style="width:15%;height:100%;background:#059669;border-radius:6px;transition:width .3s;"></div>' +
+                '</div>' +
+                '<div id="connPct" style="font-size:13px;color:#64748b;font-weight:600;">15%</div>';
+            document.body.appendChild(ov);
 
-        let p = 15;
-        _connTimer = setInterval(() => {
-            p = Math.min(90, p + 8);
-            const bar = el('connBar'), pct = el('connPct');
-            if (bar) bar.style.width = p + '%';
-            if (pct) pct.textContent = p + '%';
-        }, 300);
+            let p = 15;
+            _connTimer = setInterval(() => {
+                p = Math.min(90, p + 8);
+                const bar = el('connBar'), pct = el('connPct');
+                if (bar) bar.style.width = p + '%';
+                if (pct) pct.textContent = p + '%';
+            }, 300);
+        } catch(e) { console.warn('overlay error:', e); }
     };
 
     const hideConnectionOverlay = () => {
-        if (_connTimer) { clearInterval(_connTimer); _connTimer = null; }
-        const bar = el('connBar'), pct = el('connPct');
-        if (bar) bar.style.width = '100%';
-        if (pct) pct.textContent = '100%';
-        setTimeout(() => el('connOverlay')?.remove(), 350);
+        try {
+            if (_connTimer) { clearInterval(_connTimer); _connTimer = null; }
+            const bar = el('connBar'), pct = el('connPct');
+            if (bar) bar.style.width = '100%';
+            if (pct) pct.textContent = '100%';
+            setTimeout(() => { const o = el('connOverlay'); if (o) o.remove(); }, 350);
+        } catch(e) {}
     };
 
     // ============================================================
-    // GOOGLE DRIVE
+    // DRIVE
     // ============================================================
     const driveCall = async (payload) => {
         const url = state.settings.googleScriptUrl;
@@ -376,15 +418,14 @@ const App = (() => {
         const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ ...payload, token: state.settings.apiToken || DEFAULT_TOKEN })
+            body: JSON.stringify(Object.assign({}, payload, {
+                token: state.settings.apiToken || DEFAULT_TOKEN
+            }))
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const text = await res.text();
-        try {
-            return JSON.parse(text);
-        } catch (e) {
-            throw new Error(`Resposta não-JSON do Drive: ${text.slice(0, 120)}`);
-        }
+        try { return JSON.parse(text); }
+        catch(e) { throw new Error('Resposta não-JSON do Drive: ' + text.slice(0, 120)); }
     };
 
     const checkConnection = async () => {
@@ -393,14 +434,12 @@ const App = (() => {
         showToast('🔄 Testando conexão...', 'info');
         try {
             const data = await driveCall({ action: 'ping' });
-            if (data?.status === 'ok' || data?.status === 'success') {
+            if (data && (data.status === 'ok' || data.status === 'success')) {
                 showToast('✅ Conexão com o Google Drive ativa!', 'success');
             } else {
-                showToast(`⚠️ ${data?.message || 'Resposta inesperada.'}`, 'warning');
+                showToast('⚠️ ' + ((data && data.message) || 'Resposta inesperada.'), 'warning');
             }
-        } catch (e) {
-            showToast('❌ ' + (e.message || 'Falha ao conectar.'), 'error');
-        }
+        } catch (e) { showToast('❌ ' + (e.message || 'Falha ao conectar.'), 'error'); }
     };
 
     const syncToDrive = async () => {
@@ -409,9 +448,8 @@ const App = (() => {
             return;
         }
         try {
-            // SANITIZA TUDO antes de enviar
-            const cleanTx = state.transactions.map(sanitizeTxForDrive).filter(t => t.id && t.date);
-            const cleanUsers = state.users.map(u => ({
+            const cleanTx = (state.transactions || []).map(sanitizeTxForDrive).filter(Boolean);
+            const cleanUsers = (state.users || []).filter(u => u && u.email).map(u => ({
                 id: String(u.id || ''),
                 name: String(u.name || ''),
                 email: String(u.email || ''),
@@ -437,36 +475,36 @@ const App = (() => {
                 }
             });
 
-            if (data?.status === 'ok' || data?.status === 'success') {
-                showToast(`✅ ${cleanTx.length} registros salvos no Drive!`);
+            if (data && (data.status === 'ok' || data.status === 'success')) {
+                showToast('✅ ' + cleanTx.length + ' registros salvos no Drive!');
             } else {
-                showToast(data?.message || '❌ Erro ao salvar no Drive.', 'error');
+                showToast((data && data.message) || '❌ Erro ao salvar no Drive.', 'error');
             }
         } catch (e) {
             console.error('syncToDrive:', e);
-            showToast('❌ ' + (e.message || 'Erro ao comunicar com o Google Drive.'), 'error');
+            showToast('❌ ' + (e.message || 'Erro ao comunicar com o Drive.'), 'error');
         }
     };
 
     const mergeDriveData = (remote) => {
         if (!remote || typeof remote !== 'object') return { localOnlyCount: 0, remoteCount: 0 };
-
         const remoteRaw = Array.isArray(remote.transactions) ? remote.transactions
-                        : Array.isArray(remote)               ? remote
-                        : [];
+                        : Array.isArray(remote)               ? remote : [];
         const remoteTxs = remoteRaw.map(normalizeTx).filter(Boolean);
         const remoteIds = new Set(remoteTxs.map(t => t.id));
         const localOnly = state.transactions.filter(t => !remoteIds.has(t.id));
 
-        state.transactions = [...remoteTxs, ...localOnly];
+        state.transactions = remoteTxs.concat(localOnly);
 
         if (Array.isArray(remote.users) && remote.users.length > 0) {
             const map = new Map(state.users.map(u => [u.email, u]));
-            remote.users.forEach(u => { if (u?.email) map.set(u.email, u); });
+            remote.users.forEach(u => { if (u && u.email) map.set(u.email, u); });
             state.users = Array.from(map.values());
         }
         if (remote.settings && typeof remote.settings === 'object') {
-            state.settings = { ...state.settings, ...remote.settings, apiToken: state.settings.apiToken };
+            state.settings = Object.assign({}, state.settings, remote.settings, {
+                apiToken: state.settings.apiToken
+            });
         }
         return { localOnlyCount: localOnly.length, remoteCount: remoteTxs.length };
     };
@@ -480,26 +518,24 @@ const App = (() => {
             if (!silent) showToast('🔄 Sincronizando com o Drive...', 'info');
             const data = await driveCall({ action: 'fetch' });
 
-            const payload =
-                (data && typeof data === 'object' && data.data && typeof data.data === 'object') ? data.data :
-                (data && typeof data === 'object') ? data : {};
+            const payload = (data && typeof data === 'object' && data.data && typeof data.data === 'object')
+                ? data.data : (data && typeof data === 'object' ? data : {});
 
-            const ok = data?.status === 'ok' || data?.status === 'success';
+            const ok = data && (data.status === 'ok' || data.status === 'success');
 
-            if (ok && (Array.isArray(payload.transactions) || Array.isArray(data?.transactions))) {
-                const merged = {
-                    ...payload,
+            if (ok && (Array.isArray(payload.transactions) || Array.isArray(data.transactions))) {
+                const merged = Object.assign({}, payload, {
                     transactions: payload.transactions || data.transactions || []
-                };
-                const { localOnlyCount } = mergeDriveData(merged);
+                });
+                const result = mergeDriveData(merged);
                 saveState();
                 refreshAllViews();
-                if (!silent) showToast(`✅ ${state.transactions.length} registros sincronizados!`);
-                if (localOnlyCount > 0) syncToDrive();
+                if (!silent) showToast('✅ ' + state.transactions.length + ' registros sincronizados!');
+                if (result.localOnlyCount > 0) syncToDrive();
             } else if (ok && !payload.transactions) {
                 if (!silent) showToast('ℹ️ Drive sem dados ainda. Base local preservada.', 'info');
             } else if (!silent) {
-                showToast(data?.message || '❌ Erro ao consultar o Drive.', 'error');
+                showToast((data && data.message) || '❌ Erro ao consultar o Drive.', 'error');
             }
         } catch (e) {
             console.error('syncFromDrive:', e);
@@ -515,8 +551,8 @@ const App = (() => {
     // ============================================================
     // CÁLCULOS
     // ============================================================
-    const isAporte  = (t) => t.type === 'investment' && (t.investAction || 'aporte') !== 'resgate';
-    const isResgate = (t) => t.type === 'investment' && (t.investAction || 'aporte') === 'resgate';
+    const isAporte  = (t) => t && t.type === 'investment' && (t.investAction || 'aporte') !== 'resgate';
+    const isResgate = (t) => t && t.type === 'investment' && (t.investAction || 'aporte') === 'resgate';
 
     const calcMonth = (txs) => {
         const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
@@ -524,9 +560,11 @@ const App = (() => {
         const expense  = sum(txs.filter(t => t.type === 'expense'));
         const aportes  = sum(txs.filter(isAporte));
         const resgates = sum(txs.filter(isResgate));
-        const investment = aportes - resgates;
-        const balance = income - expense - aportes + resgates;
-        return { income, expense, investment, aportes, resgates, balance };
+        return {
+            income, expense, aportes, resgates,
+            investment: aportes - resgates,
+            balance: income - expense - aportes + resgates
+        };
     };
 
     const calcTotals = () => {
@@ -548,14 +586,14 @@ const App = (() => {
 
         const month  = calcMonth(txs);
         const totals = calcTotals();
-
-        // Filtro por país usa country JÁ normalizado
         const esTxs = txs.filter(t => t.country === 'ES');
         const brTxs = txs.filter(t => t.country === 'BR');
-        const monthES = calcMonth(esTxs);
-        const monthBR = calcMonth(brTxs);
 
-        return { ym, txs, ...month, ...totals, monthES, monthBR, countES: esTxs.length, countBR: brTxs.length };
+        return Object.assign(
+            { ym, txs, countES: esTxs.length, countBR: brTxs.length },
+            month, totals,
+            { monthES: calcMonth(esTxs), monthBR: calcMonth(brTxs) }
+        );
     };
 
     const changeSelectedMonth = (m) => {
@@ -584,33 +622,31 @@ const App = (() => {
         if (pageId === 'dashboard') setTimeout(renderChart, 50);
     };
 
-    const nav = (btn) => {
-        const pageId = btn.getAttribute('data-page');
-        navByPage(pageId);
-    };
+    const nav = (btn) => navByPage(btn.getAttribute('data-page'));
 
     // ============================================================
-    // RENDERIZAÇÃO
+    // RENDER
     // ============================================================
     const refreshAllViews = () => {
-        const d = el('dashboard');    if (d) d.innerHTML = renderDashboard();
-        const t = el('transactions'); if (t) t.innerHTML = renderTransactions();
-        const r = el('reports');      if (r) r.innerHTML = renderMonthlyReport();
-        const s = el('settings');     if (s) s.innerHTML = renderSettings();
-
-        const active = document.querySelector('.sidebar .nav-item.active')?.getAttribute('data-page') || 'dashboard';
-        navByPage(active);
+        try {
+            const d = el('dashboard');    if (d) d.innerHTML = renderDashboard();
+            const t = el('transactions'); if (t) t.innerHTML = renderTransactions();
+            const r = el('reports');      if (r) r.innerHTML = renderMonthlyReport();
+            const s = el('settings');     if (s) s.innerHTML = renderSettings();
+            const activeBtn = document.querySelector('.sidebar .nav-item.active');
+            navByPage(activeBtn ? activeBtn.getAttribute('data-page') : 'dashboard');
+        } catch(e) { console.error('refreshAllViews:', e); }
     };
 
-    // -------- SETUP / LOGIN --------
+    // -------- SETUP --------
     const renderSetup = () => {
         el('app').innerHTML = `
-            <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--bg)">
+            <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:#f1f5f9">
                 <div class="card" style="width:100%;max-width:440px;padding:32px">
                     <div style="text-align:center;margin-bottom:28px">
                         <div style="font-size:36px;margin-bottom:8px">💰</div>
-                        <h1 style="color:var(--navy);margin:0 0 6px;font-size:22px">FinFam</h1>
-                        <p style="color:var(--text-light);margin:0;font-size:14px">Configuração Inicial do Administrador</p>
+                        <h1 style="color:#1e3a5f;margin:0 0 6px;font-size:22px">FinFam</h1>
+                        <p style="color:#475569;margin:0;font-size:14px">Configuração Inicial do Administrador</p>
                     </div>
                     <form onsubmit="App.doSetup(event)">
                         <div class="form-group"><label class="form-label">Nome Completo</label>
@@ -629,36 +665,41 @@ const App = (() => {
 
     const doSetup = async (e) => {
         e.preventDefault();
-        const name  = el('setupName').value.trim();
-        const email = el('setupEmail').value.trim().toLowerCase();
-        const pwd   = el('setupPassword').value;
-        const url   = el('setupScriptUrl').value.trim();
+        try {
+            const name  = el('setupName').value.trim();
+            const email = el('setupEmail').value.trim().toLowerCase();
+            const pwd   = el('setupPassword').value;
+            const url   = el('setupScriptUrl').value.trim();
 
-        if (!name || !email || !pwd) { alert('Preencha todos os campos obrigatórios.'); return; }
+            if (!name || !email || !pwd) { alert('Preencha todos os campos obrigatórios.'); return; }
 
-        const admin = {
-            id: 'user_' + Date.now(),
-            name, email,
-            passwordHash: await hashPwd(pwd),
-            role: 'admin',
-            createdAt: new Date().toISOString()
-        };
-        state.users = [admin];
-        if (url) state.settings.googleScriptUrl = url;
-        saveState();
-        setSession(admin.id);
-        renderApp();
-        showToast('🎉 Sistema configurado com sucesso!', 'success');
+            const admin = {
+                id: 'user_' + Date.now(),
+                name, email,
+                passwordHash: await hashPwd(pwd),
+                role: 'admin',
+                createdAt: new Date().toISOString()
+            };
+            state.users = [admin];
+            if (url) state.settings.googleScriptUrl = url;
+            saveState();
+            setSession(admin.id);
+            renderApp();
+            showToast('🎉 Sistema configurado com sucesso!', 'success');
+        } catch(err) {
+            console.error('doSetup:', err);
+            alert('Erro ao configurar: ' + err.message);
+        }
     };
 
     const renderLogin = () => {
         el('app').innerHTML = `
-            <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:var(--bg)">
+            <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:#f1f5f9">
                 <div class="card" style="width:100%;max-width:400px;padding:32px">
                     <div style="text-align:center;margin-bottom:28px">
                         <div style="font-size:36px;margin-bottom:8px">💰</div>
-                        <h1 style="color:var(--navy);margin:0 0 6px;font-size:22px">FinFam</h1>
-                        <p style="color:var(--text-light);margin:0;font-size:14px">Controle Financeiro Familiar</p>
+                        <h1 style="color:#1e3a5f;margin:0 0 6px;font-size:22px">FinFam</h1>
+                        <p style="color:#475569;margin:0;font-size:14px">Controle Financeiro Familiar</p>
                     </div>
                     <form onsubmit="App.doLogin(event)">
                         <div class="form-group"><label class="form-label">E-mail</label>
@@ -673,19 +714,23 @@ const App = (() => {
 
     const doLogin = async (e) => {
         e.preventDefault();
-        const email = el('loginEmail').value.trim().toLowerCase();
-        const pwd   = el('loginPassword').value;
+        try {
+            const email = el('loginEmail').value.trim().toLowerCase();
+            const pwd   = el('loginPassword').value;
+            const user  = state.users.find(u => u.email.toLowerCase() === email);
+            if (!user) { showToast('E-mail ou senha incorretos.', 'error'); return; }
 
-        const user = state.users.find(u => u.email.toLowerCase() === email);
-        if (!user) { showToast('E-mail ou senha incorretos.', 'error'); return; }
+            const pwdHash = await hashPwd(pwd);
+            if (user.passwordHash !== pwdHash) { showToast('E-mail ou senha incorretos.', 'error'); return; }
 
-        const pwdHash = await hashPwd(pwd);
-        if (user.passwordHash !== pwdHash) { showToast('E-mail ou senha incorretos.', 'error'); return; }
-
-        setSession(user.id);
-        renderApp();
-        showConnectionOverlay();
-        syncFromDrive(true).finally(hideConnectionOverlay);
+            setSession(user.id);
+            renderApp();
+            showConnectionOverlay();
+            syncFromDrive(true).finally(hideConnectionOverlay);
+        } catch(err) {
+            console.error('doLogin:', err);
+            showToast('Erro no login: ' + err.message, 'error');
+        }
     };
 
     const logout = () => {
@@ -700,7 +745,7 @@ const App = (() => {
         refreshAllViews();
     };
 
-    // -------- Badges e valores --------
+    // -------- BADGES --------
     const renderTypeBadge = (t) => {
         if (t.type === 'income')  return '<span class="badge badge-success">Receita</span>';
         if (t.type === 'expense') return '<span class="badge badge-danger">Despesa</span>';
@@ -719,10 +764,7 @@ const App = (() => {
         return `<span style="font-weight:600;color:${color}">${sign}${fmtMoney(t.amount, cur)}</span>`;
     };
 
-    const renderCountryLabel = (country) => {
-        const c = sanitizeCountry(country);
-        return c === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES';
-    };
+    const renderCountryLabel = (country) => sanitizeCountry(country) === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES';
 
     // -------- DASHBOARD --------
     const renderDashboard = () => {
@@ -732,8 +774,8 @@ const App = (() => {
         return `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:16px">
                 <div>
-                    <h1 style="color:var(--navy);margin:0 0 4px;font-size:24px">Visão Geral</h1>
-                    <p style="color:var(--text-light);margin:0;font-size:14px">Resumo consolidado das finanças familiares</p>
+                    <h1 style="color:#1e3a5f;margin:0 0 4px;font-size:24px">Visão Geral</h1>
+                    <p style="color:#475569;margin:0;font-size:14px">Resumo consolidado das finanças familiares</p>
                 </div>
                 <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
                     <input type="month" class="input-field" value="${m.ym}" onchange="App.changeSelectedMonth(this.value)" style="width:auto">
@@ -741,7 +783,7 @@ const App = (() => {
                 </div>
             </div>
 
-            <h3 style="color:var(--text-light);font-size:12px;text-transform:uppercase;letter-spacing:.8px;margin:0 0 10px">🇪🇸 Movimento em Euros (€)</h3>
+            <h3 style="color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.8px;margin:0 0 10px">🇪🇸 Movimento em Euros (€)</h3>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px">
                 <div class="card stat-card">
                     <div class="stat-label">Saldo Livre</div>
@@ -758,11 +800,11 @@ const App = (() => {
                 <div class="card stat-card" style="border-left:4px solid #8b5cf6">
                     <div class="stat-label">Aportes</div>
                     <div class="stat-value" style="color:#8b5cf6">${fmtMoney(m.monthES.aportes, '€')}</div>
-                    ${m.monthES.resgates > 0 ? `<div style="font-size:11px;color:var(--warning);margin-top:4px">Resgates: ${fmtMoney(m.monthES.resgates, '€')}</div>` : ''}
+                    ${m.monthES.resgates > 0 ? `<div style="font-size:11px;color:#d97706;margin-top:4px">Resgates: ${fmtMoney(m.monthES.resgates, '€')}</div>` : ''}
                 </div>
             </div>
 
-            <h3 style="color:var(--text-light);font-size:12px;text-transform:uppercase;letter-spacing:.8px;margin:0 0 10px">🇧🇷 Movimento em Reais (R$)</h3>
+            <h3 style="color:#475569;font-size:12px;text-transform:uppercase;letter-spacing:.8px;margin:0 0 10px">🇧🇷 Movimento em Reais (R$)</h3>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
                 <div class="card stat-card">
                     <div class="stat-label">Saldo Livre</div>
@@ -779,27 +821,27 @@ const App = (() => {
                 <div class="card stat-card" style="border-left:4px solid #8b5cf6">
                     <div class="stat-label">Aportes</div>
                     <div class="stat-value" style="color:#8b5cf6">${fmtMoney(m.monthBR.aportes, 'R$')}</div>
-                    ${m.monthBR.resgates > 0 ? `<div style="font-size:11px;color:var(--warning);margin-top:4px">Resgates: ${fmtMoney(m.monthBR.resgates, 'R$')}</div>` : ''}
+                    ${m.monthBR.resgates > 0 ? `<div style="font-size:11px;color:#d97706;margin-top:4px">Resgates: ${fmtMoney(m.monthBR.resgates, 'R$')}</div>` : ''}
                 </div>
             </div>
 
             <div class="card stat-card net-worth-card" style="margin-bottom:24px">
                 <div class="stat-label">🏦 Patrimônio Total (Investimentos Acumulados)</div>
                 <div class="net-worth-value">${fmtMoney(m.totalInvestments, '€')}</div>
-                <div style="font-size:12px;color:var(--text-light);margin-top:6px">
+                <div style="font-size:12px;color:#475569;margin-top:6px">
                     Aportes totais: ${fmtMoney(m.allAportes, '€')} &nbsp;•&nbsp;
                     Resgates totais: ${fmtMoney(m.allResgates, '€')}
                 </div>
             </div>
 
             <div class="card" style="padding:24px;margin-bottom:24px">
-                <h3 style="color:var(--navy);margin-top:0">Fluxo Mensal (Euros)</h3>
+                <h3 style="color:#1e3a5f;margin-top:0">Fluxo Mensal (Euros)</h3>
                 <div style="height:240px"><canvas id="monthlyChart"></canvas></div>
             </div>
 
             <div class="card" style="padding:24px">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-                    <h3 style="color:var(--navy);margin:0">Últimos Lançamentos do Mês</h3>
+                    <h3 style="color:#1e3a5f;margin:0">Últimos Lançamentos do Mês</h3>
                     <button class="btn-secondary" onclick="App.nav(document.querySelector('.nav-item[data-page=\\'transactions\\']'))">Ver Todos</button>
                 </div>
                 <div class="table-container">
@@ -813,7 +855,7 @@ const App = (() => {
                         </thead>
                         <tbody>
                             ${recent.length === 0
-                                ? `<tr><td colspan="7" style="text-align:center;color:var(--text-light);padding:24px">Nenhum lançamento registrado neste mês.</td></tr>`
+                                ? `<tr><td colspan="7" style="text-align:center;color:#475569;padding:24px">Nenhum lançamento registrado neste mês.</td></tr>`
                                 : recent.map(t => {
                                     const cat = getCategoryDisplay(t.categoryId);
                                     const cur = t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES;
@@ -870,8 +912,8 @@ const App = (() => {
         return `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:16px">
                 <div>
-                    <h1 style="color:var(--navy);margin:0 0 4px;font-size:24px">Lançamentos</h1>
-                    <p style="color:var(--text-light);margin:0;font-size:14px">Histórico completo de transações</p>
+                    <h1 style="color:#1e3a5f;margin:0 0 4px;font-size:24px">Lançamentos</h1>
+                    <p style="color:#475569;margin:0;font-size:14px">Histórico completo de transações</p>
                 </div>
                 <div style="display:flex;gap:12px;align-items:center">
                     <input type="month" class="input-field" value="${ym}" onchange="App.changeSelectedMonth(this.value)" style="width:auto">
@@ -890,7 +932,7 @@ const App = (() => {
                         </thead>
                         <tbody>
                             ${txs.length === 0
-                                ? `<tr><td colspan="8" style="text-align:center;color:var(--text-light);padding:32px">Nenhum lançamento encontrado para este mês.</td></tr>`
+                                ? `<tr><td colspan="8" style="text-align:center;color:#475569;padding:32px">Nenhum lançamento encontrado para este mês.</td></tr>`
                                 : txs.map(t => {
                                     const cat = getCategoryDisplay(t.categoryId);
                                     const cur = t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES;
@@ -915,7 +957,7 @@ const App = (() => {
             </div>`;
     };
 
-    // -------- RELATÓRIO MENSAL --------
+    // -------- RELATÓRIO --------
     const renderMonthlyReport = () => {
         const selMonth = state.selectedMonth || new Date().toISOString().slice(0,7);
         const txs = state.transactions
@@ -938,7 +980,7 @@ const App = (() => {
         const section = (title, items, total, cur, badgeClass, prefix) => `
             <div class="card" style="padding:24px;margin-bottom:24px">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-                    <h3 style="color:var(--navy);margin:0">${title} (${fmtMoney(total, cur)})</h3>
+                    <h3 style="color:#1e3a5f;margin:0">${title} (${fmtMoney(total, cur)})</h3>
                     <span class="badge ${badgeClass}">${items.length} lançamentos</span>
                 </div>
                 <div class="table-container">
@@ -951,7 +993,7 @@ const App = (() => {
                         </thead>
                         <tbody>
                             ${items.length === 0
-                                ? `<tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:16px">Nenhum registro encontrado no mês.</td></tr>`
+                                ? `<tr><td colspan="5" style="text-align:center;color:#475569;padding:16px">Nenhum registro no mês.</td></tr>`
                                 : items.map(t => {
                                     const cat = getCategoryDisplay(t.categoryId);
                                     return `
@@ -972,8 +1014,8 @@ const App = (() => {
             <div id="reportContainer" style="background:#fff">
                 <div class="no-print" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:16px">
                     <div>
-                        <h2 style="color:var(--navy);margin:0 0 4px 0">Relatório Mensal</h2>
-                        <p style="color:var(--text-light);margin:0;font-size:14px">Detalhamento financeiro consolidado (${txs.length} lançamentos)</p>
+                        <h2 style="color:#1e3a5f;margin:0 0 4px 0">Relatório Mensal</h2>
+                        <p style="color:#475569;margin:0;font-size:14px">Detalhamento financeiro consolidado (${txs.length} lançamentos)</p>
                     </div>
                     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
                         <input type="month" id="reportMonthPicker" class="input-field" value="${selMonth}" onchange="App.changeReportMonth(this.value)" style="width:auto">
@@ -982,13 +1024,13 @@ const App = (() => {
                     </div>
                 </div>
 
-                <h2 style="color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px;margin-bottom:16px">🇪🇸 Espanha</h2>
+                <h2 style="color:#1e3a5f;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin-bottom:16px">🇪🇸 Espanha</h2>
                 ${section('Despesas em Espanha', expES, sum(expES), '€', 'badge-danger', '-')}
                 ${section('Receitas em Espanha', incES, sum(incES), '€', 'badge-success', '+')}
                 ${section('Aportes em Espanha', apoES, sum(apoES), '€', 'badge-purple', '-')}
                 ${section('Resgates em Espanha', resES, sum(resES), '€', 'badge-warning', '+')}
 
-                <h2 style="color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px;margin:28px 0 16px">🇧🇷 Brasil</h2>
+                <h2 style="color:#1e3a5f;border-bottom:2px solid #e2e8f0;padding-bottom:8px;margin:28px 0 16px">🇧🇷 Brasil</h2>
                 ${section('Despesas no Brasil', expBR, sum(expBR), 'R$', 'badge-danger', '-')}
                 ${section('Receitas no Brasil', incBR, sum(incBR), 'R$', 'badge-success', '+')}
                 ${section('Aportes no Brasil', apoBR, sum(apoBR), 'R$', 'badge-purple', '-')}
@@ -996,9 +1038,7 @@ const App = (() => {
             </div>`;
     };
 
-    // ============================================================
-    // PDF — ABORDAGEM DEFINITIVA: renderiza HTML próprio, limpo
-    // ============================================================
+    // -------- PDF --------
     const exportToPDF = () => {
         if (typeof html2pdf === 'undefined') { showToast('Biblioteca PDF não carregada.', 'error'); return; }
 
@@ -1014,37 +1054,30 @@ const App = (() => {
         const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
         const filterBy = (country, pred) => txs.filter(t => t.country === country && pred(t));
         const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        const money = (v, cur) => `${cur} ${Number(v||0).toFixed(2).replace('.', ',')}`;
+        const money = (v, cur) => cur + ' ' + Number(v||0).toFixed(2).replace('.', ',');
 
         const buildTable = (items, cur, prefix) => {
             if (items.length === 0) {
-                return `<p style="color:#64748b;font-size:11px;padding:8px;background:#f8fafc;border-radius:4px;">Nenhum registro no mês.</p>`;
+                return '<p style="color:#64748b;font-size:11px;padding:8px;background:#f8fafc;border-radius:4px;">Nenhum registro no mês.</p>';
             }
-            return `
-                <table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;">
-                    <thead>
-                        <tr style="background:#f1f5f9;">
-                            <th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:70px;">Data</th>
-                            <th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Descrição</th>
-                            <th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Categoria</th>
-                            <th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:100px;">Responsável</th>
-                            <th style="padding:6px 8px;text-align:right;border:1px solid #cbd5e1;width:100px;">Valor</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${items.map(t => {
-                            const cat = getCategoryDisplay(t.categoryId);
-                            return `
-                                <tr>
-                                    <td style="padding:5px 8px;border:1px solid #e2e8f0;">${fmtDate(t.date)}</td>
-                                    <td style="padding:5px 8px;border:1px solid #e2e8f0;">${esc(t.description)}</td>
-                                    <td style="padding:5px 8px;border:1px solid #e2e8f0;">${esc(cat.name)}</td>
-                                    <td style="padding:5px 8px;border:1px solid #e2e8f0;">${esc(t.assignedTo || 'Casal')}</td>
-                                    <td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;">${prefix}${money(t.amount, cur)}</td>
-                                </tr>`;
-                        }).join('')}
-                    </tbody>
-                </table>`;
+            return '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;">' +
+                '<thead><tr style="background:#f1f5f9;">' +
+                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:70px;">Data</th>' +
+                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Descrição</th>' +
+                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Categoria</th>' +
+                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:100px;">Responsável</th>' +
+                    '<th style="padding:6px 8px;text-align:right;border:1px solid #cbd5e1;width:100px;">Valor</th>' +
+                '</tr></thead><tbody>' +
+                items.map(t => {
+                    const cat = getCategoryDisplay(t.categoryId);
+                    return '<tr>' +
+                        '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + fmtDate(t.date) + '</td>' +
+                        '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.description) + '</td>' +
+                        '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(cat.name) + '</td>' +
+                        '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.assignedTo || 'Casal') + '</td>' +
+                        '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;">' + prefix + money(t.amount, cur) + '</td>' +
+                    '</tr>';
+                }).join('') + '</tbody></table>';
         };
 
         const block = (country, label, cur) => {
@@ -1052,43 +1085,30 @@ const App = (() => {
             const inc = filterBy(country, t => t.type === 'income');
             const apo = filterBy(country, isAporte);
             const res = filterBy(country, isResgate);
-            return `
-                <div style="margin-bottom:20px;">
-                    <h3 style="color:#1e3a5f;font-size:13px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">${label}</h3>
-
-                    <p style="font-size:11px;font-weight:600;color:#dc2626;margin:8px 0 4px;">Despesas (${money(sum(exp), cur)})</p>
-                    ${buildTable(exp, cur, '-')}
-
-                    <p style="font-size:11px;font-weight:600;color:#059669;margin:8px 0 4px;">Receitas (${money(sum(inc), cur)})</p>
-                    ${buildTable(inc, cur, '+')}
-
-                    <p style="font-size:11px;font-weight:600;color:#8b5cf6;margin:8px 0 4px;">Aportes (${money(sum(apo), cur)})</p>
-                    ${buildTable(apo, cur, '-')}
-
-                    <p style="font-size:11px;font-weight:600;color:#d97706;margin:8px 0 4px;">Resgates (${money(sum(res), cur)})</p>
-                    ${buildTable(res, cur, '+')}
-                </div>`;
+            return '<div style="margin-bottom:20px;">' +
+                '<h3 style="color:#1e3a5f;font-size:13px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">' + label + '</h3>' +
+                '<p style="font-size:11px;font-weight:600;color:#dc2626;margin:8px 0 4px;">Despesas (' + money(sum(exp), cur) + ')</p>' + buildTable(exp, cur, '-') +
+                '<p style="font-size:11px;font-weight:600;color:#059669;margin:8px 0 4px;">Receitas (' + money(sum(inc), cur) + ')</p>' + buildTable(inc, cur, '+') +
+                '<p style="font-size:11px;font-weight:600;color:#8b5cf6;margin:8px 0 4px;">Aportes (' + money(sum(apo), cur) + ')</p>' + buildTable(apo, cur, '-') +
+                '<p style="font-size:11px;font-weight:600;color:#d97706;margin:8px 0 4px;">Resgates (' + money(sum(res), cur) + ')</p>' + buildTable(res, cur, '+') +
+            '</div>';
         };
 
         const totalES = calcMonth(txs.filter(t => t.country === 'ES'));
         const totalBR = calcMonth(txs.filter(t => t.country === 'BR'));
 
-        const html = `
-            <div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;padding:10px;background:#fff;">
-                <h1 style="color:#1e3a5f;font-size:18px;margin:0 0 4px;">FinFam — Relatório Mensal</h1>
-                <p style="font-size:11px;color:#64748b;margin:0 0 4px;">Mês: <strong>${selMonth}</strong> • Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+        const html = '<div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;padding:10px;background:#fff;">' +
+            '<h1 style="color:#1e3a5f;font-size:18px;margin:0 0 4px;">FinFam — Relatório Mensal</h1>' +
+            '<p style="font-size:11px;color:#64748b;margin:0 0 4px;">Mês: <strong>' + selMonth + '</strong> • Gerado em: ' + new Date().toLocaleString('pt-BR') + '</p>' +
+            '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:12px 0;">' +
+                '<p style="font-size:11px;margin:0 0 6px;font-weight:600;color:#1e3a5f;">Resumo Consolidado</p>' +
+                '<p style="font-size:10px;margin:2px 0;">🇪🇸 <strong>Espanha:</strong> Receitas ' + money(totalES.income,'€') + ' • Despesas ' + money(totalES.expense,'€') + ' • Aportes ' + money(totalES.aportes,'€') + ' • Resgates ' + money(totalES.resgates,'€') + ' • Saldo <strong>' + money(totalES.balance,'€') + '</strong></p>' +
+                '<p style="font-size:10px;margin:2px 0;">🇧🇷 <strong>Brasil:</strong> Receitas ' + money(totalBR.income,'R$') + ' • Despesas ' + money(totalBR.expense,'R$') + ' • Aportes ' + money(totalBR.aportes,'R$') + ' • Resgates ' + money(totalBR.resgates,'R$') + ' • Saldo <strong>' + money(totalBR.balance,'R$') + '</strong></p>' +
+            '</div>' +
+            block('ES', '🇪🇸 Espanha', '€') +
+            block('BR', '🇧🇷 Brasil', 'R$') +
+        '</div>';
 
-                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:12px 0;">
-                    <p style="font-size:11px;margin:0 0 6px;font-weight:600;color:#1e3a5f;">Resumo Consolidado</p>
-                    <p style="font-size:10px;margin:2px 0;">🇪🇸 <strong>Espanha:</strong> Receitas ${money(totalES.income,'€')} • Despesas ${money(totalES.expense,'€')} • Aportes ${money(totalES.aportes,'€')} • Resgates ${money(totalES.resgates,'€')} • Saldo <strong>${money(totalES.balance,'€')}</strong></p>
-                    <p style="font-size:10px;margin:2px 0;">🇧🇷 <strong>Brasil:</strong> Receitas ${money(totalBR.income,'R$')} • Despesas ${money(totalBR.expense,'R$')} • Aportes ${money(totalBR.aportes,'R$')} • Resgates ${money(totalBR.resgates,'R$')} • Saldo <strong>${money(totalBR.balance,'R$')}</strong></p>
-                </div>
-
-                ${block('ES', '🇪🇸 Espanha', '€')}
-                ${block('BR', '🇧🇷 Brasil', 'R$')}
-            </div>`;
-
-        // Container temporário VISÍVEL (não display:none, não opacity:0)
         const wrapper = document.createElement('div');
         wrapper.id = 'pdfTempWrapper';
         wrapper.style.cssText = 'position:fixed;top:0;left:0;width:900px;background:#fff;z-index:999999;padding:20px;';
@@ -1097,32 +1117,17 @@ const App = (() => {
 
         const opt = {
             margin: [8, 8, 8, 8],
-            filename: `FinFam_Relatorio_${selMonth}.pdf`,
+            filename: 'FinFam_Relatorio_' + selMonth + '.pdf',
             image: { type: 'jpeg', quality: 0.95 },
-            html2canvas: {
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                backgroundColor: '#ffffff',
-                windowWidth: 900,
-                scrollX: 0,
-                scrollY: 0
-            },
+            html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff', windowWidth: 900, scrollX: 0, scrollY: 0 },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
             pagebreak: { mode: ['css', 'legacy'] }
         };
 
         setTimeout(() => {
             html2pdf().set(opt).from(wrapper).save()
-                .then(() => {
-                    wrapper.remove();
-                    showToast('✅ PDF gerado com sucesso!', 'success');
-                })
-                .catch(err => {
-                    console.error('exportToPDF:', err);
-                    wrapper.remove();
-                    showToast('Erro ao exportar PDF.', 'error');
-                });
+                .then(() => { wrapper.remove(); showToast('✅ PDF gerado com sucesso!', 'success'); })
+                .catch(err => { console.error('exportToPDF:', err); wrapper.remove(); showToast('Erro ao exportar PDF.', 'error'); });
         }, 250);
     };
 
@@ -1145,10 +1150,10 @@ const App = (() => {
         const apoBR = by('BR', isAporte),                 resBR = by('BR', isResgate);
 
         let csv = 'sep=;\r\n';
-        csv += `RELATÓRIO MENSAL FINFAM;Mês: ${ym};Data da Exportação: ${new Date().toLocaleDateString('pt-BR')}\r\n\r\n`;
+        csv += 'RELATÓRIO MENSAL FINFAM;Mês: ' + ym + ';Data da Exportação: ' + new Date().toLocaleDateString('pt-BR') + '\r\n\r\n';
         csv += 'RESUMO CONSOLIDADO\r\n';
-        csv += `Espanha (EUR);Receitas: ${fmt(incES)};Despesas: ${fmt(expES)};Aportes: ${fmt(apoES)};Resgates: ${fmt(resES)};Saldo: ${fmt(incES-expES-apoES+resES)}\r\n`;
-        csv += `Brasil (BRL);Receitas: ${fmt(incBR)};Despesas: ${fmt(expBR)};Aportes: ${fmt(apoBR)};Resgates: ${fmt(resBR)};Saldo: ${fmt(incBR-expBR-apoBR+resBR)}\r\n\r\n`;
+        csv += 'Espanha (EUR);Receitas: ' + fmt(incES) + ';Despesas: ' + fmt(expES) + ';Aportes: ' + fmt(apoES) + ';Resgates: ' + fmt(resES) + ';Saldo: ' + fmt(incES-expES-apoES+resES) + '\r\n';
+        csv += 'Brasil (BRL);Receitas: ' + fmt(incBR) + ';Despesas: ' + fmt(expBR) + ';Aportes: ' + fmt(apoBR) + ';Resgates: ' + fmt(resBR) + ';Saldo: ' + fmt(incBR-expBR-apoBR+resBR) + '\r\n\r\n';
         csv += 'DETALHAMENTO DE LANÇAMENTOS\r\n';
         csv += 'Data;Descrição;Categoria;Responsável;País;Tipo;Movimento;Valor Formatado;Valor Numérico;Moeda\r\n';
 
@@ -1161,14 +1166,14 @@ const App = (() => {
             const sign = t.type === 'expense' ? '-' : t.type === 'income' ? '+' : (isResgate(t) ? '+' : '-');
             const desc = (t.description || '').replace(/;/g, ',');
             const resp = (t.assignedTo || 'Casal').replace(/;/g, ',');
-            csv += `${fmtDate(t.date)};${desc};${cat.name};${resp};${t.country || 'ES'};${typeStr};${movement};"${sign}${numVal}";${numVal};${cur}\r\n`;
+            csv += fmtDate(t.date) + ';' + desc + ';' + cat.name + ';' + resp + ';' + (t.country || 'ES') + ';' + typeStr + ';' + movement + ';"' + sign + numVal + '";' + numVal + ';' + cur + '\r\n';
         });
 
         const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `FinFam_${ym}_Relatorio.csv`;
+        a.download = 'FinFam_' + ym + '_Relatorio.csv';
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -1178,14 +1183,14 @@ const App = (() => {
 
     // -------- CONFIGURAÇÕES --------
     const renderSettings = () => {
-        const isAdmin = state.currentUser?.role === 'admin';
+        const isAdmin = state.currentUser && state.currentUser.role === 'admin';
         return `
             <div style="max-width:900px">
-                <h1 style="color:var(--navy);margin:0 0 4px;font-size:24px">Configurações</h1>
-                <p style="color:var(--text-light);margin:0 0 24px;font-size:14px">Gerencie integrações, moedas e acessos</p>
+                <h1 style="color:#1e3a5f;margin:0 0 4px;font-size:24px">Configurações</h1>
+                <p style="color:#475569;margin:0 0 24px;font-size:14px">Gerencie integrações, moedas e acessos</p>
 
                 <div class="card" style="padding:24px;margin-bottom:24px">
-                    <h3 style="color:var(--navy);margin-top:0">Banco de Dados (Google Apps Script)</h3>
+                    <h3 style="color:#1e3a5f;margin-top:0">Banco de Dados (Google Apps Script)</h3>
                     <div class="form-group">
                         <label class="form-label">URL da Web App</label>
                         <input type="url" id="cfgScriptUrl" class="input-field" value="${state.settings.googleScriptUrl || ''}" placeholder="https://script.google.com/macros/s/...">
@@ -1199,7 +1204,7 @@ const App = (() => {
                 </div>
 
                 <div class="card" style="padding:24px;margin-bottom:24px">
-                    <h3 style="color:var(--navy);margin-top:0">Usuários do Sistema</h3>
+                    <h3 style="color:#1e3a5f;margin-top:0">Usuários do Sistema</h3>
                     <div class="table-container" style="margin-bottom:16px">
                         <table class="data-table">
                             <thead><tr><th>Nome</th><th>E-mail</th><th>Função</th><th>Ações</th></tr></thead>
@@ -1210,8 +1215,8 @@ const App = (() => {
                                         <td>${u.email}</td>
                                         <td><span class="badge ${u.role === 'admin' ? 'badge-warning' : 'badge-info'}">${u.role || 'user'}</span></td>
                                         <td>
-                                            ${u.id !== state.currentUser?.id && isAdmin
-                                                ? `<button onclick="App.deleteUser('${u.id}')" style="background:none;border:none;cursor:pointer;color:var(--danger)">Excluir</button>`
+                                            ${u.id !== (state.currentUser && state.currentUser.id) && isAdmin
+                                                ? '<button onclick="App.deleteUser(\'' + u.id + '\')" style="background:none;border:none;cursor:pointer;color:#dc2626">Excluir</button>'
                                                 : '-'}
                                         </td>
                                     </tr>`).join('')}
@@ -1219,7 +1224,7 @@ const App = (() => {
                         </table>
                     </div>
                     ${isAdmin ? `
-                        <h4 style="margin:16px 0 8px;color:var(--navy)">Adicionar Novo Usuário</h4>
+                        <h4 style="margin:16px 0 8px;color:#1e3a5f">Adicionar Novo Usuário</h4>
                         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px">
                             <input type="text" id="newUserName" class="input-field" placeholder="Nome">
                             <input type="email" id="newUserEmail" class="input-field" placeholder="E-mail">
@@ -1230,8 +1235,8 @@ const App = (() => {
 
                 ${isAdmin ? `
                     <div class="card" style="padding:24px;border:1px solid #fecaca;background:#fff5f5">
-                        <h3 style="color:var(--danger);margin-top:0">Zona de Perigo</h3>
-                        <p style="font-size:13px;color:var(--text-light)">Ações destrutivas sobre a base local e remota</p>
+                        <h3 style="color:#dc2626;margin-top:0">Zona de Perigo</h3>
+                        <p style="font-size:13px;color:#475569">Ações destrutivas sobre a base local e remota</p>
                         <div style="display:flex;gap:12px;flex-wrap:wrap">
                             <button class="btn-secondary" onclick="App.cleanGhostData()">🧹 Limpar Dados Inválidos</button>
                             <button class="btn-danger" onclick="App.resetDriveData()">🗑️ Limpar Banco no Drive</button>
@@ -1242,16 +1247,16 @@ const App = (() => {
     };
 
     const saveSettings = () => {
-        const url = el('cfgScriptUrl')?.value.trim() || '';
+        const url = el('cfgScriptUrl') ? el('cfgScriptUrl').value.trim() : '';
         state.settings.googleScriptUrl = url;
         saveState();
         showToast('Configurações salvas!', 'success');
     };
 
     const addUser = async () => {
-        const name  = el('newUserName')?.value.trim();
-        const email = el('newUserEmail')?.value.trim().toLowerCase();
-        const pwd   = el('newUserPassword')?.value;
+        const name  = el('newUserName') ? el('newUserName').value.trim() : '';
+        const email = el('newUserEmail') ? el('newUserEmail').value.trim().toLowerCase() : '';
+        const pwd   = el('newUserPassword') ? el('newUserPassword').value : '';
 
         if (!name || !email || !pwd) { showToast('Preencha todos os campos.', 'error'); return; }
         if (state.users.some(u => u.email.toLowerCase() === email)) {
@@ -1268,7 +1273,7 @@ const App = (() => {
         saveState();
         syncToDrive();
         refreshAllViews();
-        showToast(`Usuário ${name} adicionado!`, 'success');
+        showToast('Usuário ' + name + ' adicionado!', 'success');
     };
 
     const deleteUser = (userId) => {
@@ -1289,7 +1294,7 @@ const App = (() => {
         saveState();
         syncToDrive();
         refreshAllViews();
-        showToast(`Limpeza concluída! ${before - state.transactions.length} registros removidos.`, 'success');
+        showToast('Limpeza concluída! ' + (before - state.transactions.length) + ' registros removidos.', 'success');
     };
 
     const resetDriveData = async () => {
@@ -1306,12 +1311,12 @@ const App = (() => {
     };
 
     // ============================================================
-    // MODAL DE LANÇAMENTO
+    // MODAL
     // ============================================================
     const showTransactionModal = (txId) => {
         const tx = txId ? state.transactions.find(t => t.id === txId) : null;
         const isInvestment = tx ? tx.type === 'investment' : false;
-        const investAction = tx?.investAction || 'aporte';
+        const investAction = tx && tx.investAction ? tx.investAction : 'aporte';
 
         const overlay = el('modalOverlay');
         const content = el('modalContent');
@@ -1329,9 +1334,9 @@ const App = (() => {
                 <div class="form-group">
                     <label class="form-label">Tipo</label>
                     <select id="txType" class="input-field" onchange="App.onTxTypeChange(this.value)">
-                        <option value="expense"    ${tx?.type === 'expense' ? 'selected' : ''}>Despesa</option>
-                        <option value="income"     ${tx?.type === 'income'  ? 'selected' : ''}>Receita</option>
-                        <option value="investment" ${isInvestment           ? 'selected' : ''}>Investimento (Aporte / Resgate)</option>
+                        <option value="expense"    ${tx && tx.type === 'expense' ? 'selected' : ''}>Despesa</option>
+                        <option value="income"     ${tx && tx.type === 'income'  ? 'selected' : ''}>Receita</option>
+                        <option value="investment" ${isInvestment                 ? 'selected' : ''}>Investimento (Aporte / Resgate)</option>
                     </select>
                 </div>
 
@@ -1341,7 +1346,7 @@ const App = (() => {
                         <option value="aporte"  ${investAction === 'aporte'  ? 'selected' : ''}>💰 Aporte — guardar na reserva</option>
                         <option value="resgate" ${investAction === 'resgate' ? 'selected' : ''}>💸 Resgate — usar para pagar contas</option>
                     </select>
-                    <div style="font-size:11px;color:var(--text-light);margin-top:6px;line-height:1.4">
+                    <div style="font-size:11px;color:#475569;margin-top:6px;line-height:1.4">
                         <strong>Aporte:</strong> sai do Saldo Livre e vai para o Patrimônio.<br>
                         <strong>Resgate:</strong> volta do Patrimônio para o Saldo Livre.
                     </div>
@@ -1358,16 +1363,16 @@ const App = (() => {
                 <div class="form-group" id="categoryGroup" style="${isInvestment ? 'display:none;' : ''}">
                     <label class="form-label">Categoria</label>
                     <select id="txCategory" class="input-field">
-                        ${state.categories.map(c => {
+                        ${(state.categories || []).map(c => {
                             const cat = getCategoryDisplay(c.id);
-                            return `<option value="${c.id}" ${tx?.categoryId === c.id ? 'selected' : ''}>${cat.icon} ${cat.name}</option>`;
+                            return '<option value="' + c.id + '" ' + (tx && tx.categoryId === c.id ? 'selected' : '') + '>' + cat.icon + ' ' + cat.name + '</option>';
                         }).join('')}
                     </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Responsável</label>
                     <select id="txAssignedTo" class="input-field">
-                        ${getResponsibleOptions(tx?.assignedTo || 'Casal / Ambos')}
+                        ${getResponsibleOptions(tx ? tx.assignedTo : 'Casal / Ambos')}
                     </select>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -1412,30 +1417,23 @@ const App = (() => {
             const date        = el('txDate').value;
             const description = el('txDescription').value.trim();
             const country     = sanitizeCountry(el('txCountry').value);
-            const amountRaw   = el('txAmount').value;
-            const amount      = sanitizeAmount(amountRaw);
+            const amount      = sanitizeAmount(el('txAmount').value);
             const assignedTo  = el('txAssignedTo').value;
 
             let investAction;
             if (type === 'investment') {
-                investAction = sanitizeInvestAction(el('txInvestAction')?.value);
+                investAction = sanitizeInvestAction(el('txInvestAction') ? el('txInvestAction').value : 'aporte');
             }
 
             const categoryId = type === 'investment'
                 ? getInvestmentCategory().id
                 : (el('txCategory').value || 'cat_outros_es');
 
-            if (!date || !description) {
-                showToast('Informe data e descrição.', 'error'); return;
-            }
-            if (!Number.isFinite(amount) || amount <= 0) {
-                showToast('Informe um valor numérico positivo.', 'error'); return;
-            }
+            if (!date || !description) { showToast('Informe data e descrição.', 'error'); return; }
+            if (!Number.isFinite(amount) || amount <= 0) { showToast('Informe um valor numérico positivo.', 'error'); return; }
 
             const cleanYMD = parseDateToYMD(date);
-            if (!cleanYMD || cleanYMD.length !== 10) {
-                showToast('Data inválida.', 'error'); return;
-            }
+            if (!cleanYMD || cleanYMD.length !== 10) { showToast('Data inválida.', 'error'); return; }
 
             const now = new Date().toISOString();
 
@@ -1443,17 +1441,10 @@ const App = (() => {
                 const idx = state.transactions.findIndex(t => t.id === txId);
                 if (idx === -1) { showToast('Lançamento não encontrado.', 'error'); return; }
 
-                const updated = {
-                    ...state.transactions[idx],
-                    type,
-                    date: cleanYMD,
-                    description,
-                    categoryId,
-                    country,
-                    amount,
-                    assignedTo,
-                    updatedAt: now
-                };
+                const updated = Object.assign({}, state.transactions[idx], {
+                    type, date: cleanYMD, description, categoryId,
+                    country, amount, assignedTo, updatedAt: now
+                });
                 if (type === 'investment') updated.investAction = investAction;
                 else delete updated.investAction;
 
@@ -1461,15 +1452,9 @@ const App = (() => {
             } else {
                 const newTx = {
                     id: 'tx_' + generateId(),
-                    type,
-                    date: cleanYMD,
-                    description,
-                    categoryId,
-                    country,
-                    amount,
-                    assignedTo,
-                    createdAt: now,
-                    updatedAt: now
+                    type, date: cleanYMD, description, categoryId,
+                    country, amount, assignedTo,
+                    createdAt: now, updatedAt: now
                 };
                 if (type === 'investment') newTx.investAction = investAction;
                 state.transactions.unshift(normalizeTx(newTx));
@@ -1486,7 +1471,7 @@ const App = (() => {
                         : '✅ Lançamento registrado!';
             showToast(msg, 'success');
         } catch (err) {
-            console.error('saveTransaction error:', err);
+            console.error('saveTransaction:', err);
             showToast('Erro ao salvar: ' + (err.message || 'desconhecido'), 'error');
         }
     };
@@ -1519,9 +1504,9 @@ const App = (() => {
                 </div>
                 <div style="padding:16px;border-top:1px solid rgba(255,255,255,.1)">
                     <div style="display:flex;align-items:center;gap:10px">
-                        <div class="user-avatar">${state.currentUser?.name?.charAt(0).toUpperCase() || 'U'}</div>
+                        <div class="user-avatar">${state.currentUser ? (state.currentUser.name || 'U').charAt(0).toUpperCase() : 'U'}</div>
                         <div style="flex:1;min-width:0">
-                            <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${state.currentUser?.name || ''}</div>
+                            <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${state.currentUser ? state.currentUser.name : ''}</div>
                             <button onclick="App.togglePrivacy()" style="background:none;border:none;color:rgba(255,255,255,.8);cursor:pointer;font-size:12px;padding:0">
                                 ${state.privacyMode ? '👁️ Mostrar' : '🙈 Ocultar'}
                             </button>
@@ -1545,21 +1530,34 @@ const App = (() => {
     // INIT
     // ============================================================
     const init = () => {
-        initState();
+        try {
+            initState();
 
-        ['click','keydown','mousemove','touchstart'].forEach(evt =>
-            document.addEventListener(evt, resetInactivityTimer, { passive: true })
-        );
+            ['click','keydown','mousemove','touchstart'].forEach(evt =>
+                document.addEventListener(evt, resetInactivityTimer, { passive: true })
+            );
 
-        if (!isSetup())        renderSetup();
-        else if (!isLoggedIn()) renderLogin();
-        else {
-            renderApp();
-            showConnectionOverlay();
-            syncFromDrive(true).finally(hideConnectionOverlay);
+            if (!isSetup()) renderSetup();
+            else if (!isLoggedIn()) renderLogin();
+            else {
+                renderApp();
+                showConnectionOverlay();
+                syncFromDrive(true).finally(hideConnectionOverlay);
+            }
+        } catch(e) {
+            console.error('init:', e);
+            document.getElementById('app').innerHTML =
+                '<div style="padding:40px;font-family:sans-serif;text-align:center;">' +
+                '<h2 style="color:#dc2626;">Erro ao iniciar o aplicativo</h2>' +
+                '<p style="color:#475569;">' + (e.message || 'Erro desconhecido') + '</p>' +
+                '<button onclick="localStorage.clear();location.reload()" style="padding:10px 20px;background:#1e3a5f;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-top:16px;">Resetar e Recarregar</button>' +
+                '</div>';
         }
     };
 
+    // ============================================================
+    // API PÚBLICA
+    // ============================================================
     return {
         init, doSetup, doLogin, logout, nav, togglePrivacy,
         changeSelectedMonth, changeReportMonth,
