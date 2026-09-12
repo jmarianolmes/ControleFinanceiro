@@ -1,7 +1,7 @@
 // ============================================================
 // FinFam — Controle Financeiro Familiar
 // Arquivo: js/app.js
-// Versão: 6.0 — limpa, sem duplicações
+// Versão: 7.0 — limpa, sem duplicações
 // ============================================================
 
 const App = (() => {
