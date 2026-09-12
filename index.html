@@ -9,7 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.3/html2pdf.bundle.min.js"></script>
     <style>
         :root {
             --navy: #1e3a5f;
@@ -193,12 +193,72 @@
             .modal { padding: 20px; }
         }
 
-        @media print {
-            .sidebar, .no-print, button, .modal-overlay, .toast, .close-btn { display: none !important; }
-            body { background: #fff !important; color: #000 !important; }
-            .main-content { margin-left: 0 !important; padding: 0 !important; }
-            .card { box-shadow: none !important; border: 1px solid #cbd5e1 !important; break-inside: avoid; }
-        }
+       @media print {
+    .sidebar, 
+    .no-print, 
+    button, 
+    .btn-primary, 
+    .modal-overlay, 
+    .toast, 
+    .close-btn {
+        display: none !important;
+    }
+    body {
+        background: #fff !important;
+        color: #000 !important;
+        font-size: 12pt;
+    }
+    .main-content {
+        margin-left: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        box-shadow: none !important;
+    }
+    .card {
+        box-shadow: none !important;
+        border: 1px solid #cbd5e1 !important;
+        padding: 15px !important;
+        margin-bottom: 20px !important;
+        break-inside: avoid;
+    }
+    .data-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+    }
+    .data-table th, 
+    .data-table td {
+        padding: 8px 10px !important;
+        border-bottom: 1px solid #e2e8f0 !important;
+        font-size: 10pt !important;
+        color: #000 !important;
+    }
+    .data-table th {
+        background-color: #f1f5f9 !important;
+        font-weight: bold !important;
+    }
+}
+
+/* ============================================================
+   REGRAS ESPECÍFICAS PARA O MOMENTO DA CAPTURA DO PDF
+   (aplicadas via JS no <html> durante o exportToPDF)
+   ============================================================ */
+html.pdf-capturing .main-content {
+    margin-left: 0 !important;
+    padding: 0 !important;
+    max-width: 100% !important;
+}
+html.pdf-capturing .sidebar {
+    display: none !important;
+}
+html.pdf-capturing .table-container {
+    overflow: visible !important;
+    width: 100% !important;
+}
+html.pdf-capturing .card {
+    box-shadow: none !important;
+    border: 1px solid #e2e8f0 !important;
+}
     </style>
 </head>
 <body>
