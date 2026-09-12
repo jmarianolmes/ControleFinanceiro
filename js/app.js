@@ -1,44 +1,36 @@
-/**
- * FinFam - Controle Financeiro Familiar
- * Aplicação Completa com Sincronização Google Drive
- */
+// ============================================================
+// FinFam - Controle Financeiro Familiar
+// Arquivo: js/app.js (VERSÃO COMPLETA E CORRIGIDA)
+// ============================================================
 
-const FinFam = (() => {
-    // ==================== CONFIGURAÇÃO PADRÃO ====================
-    const DEFAULT_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbz_9eWl83n8j11Z-d3t7N8j9k0l1m2n3o4p5/exec';
-    const DEFAULT_TOKEN = 'finfam_secret_token_2024';
+const App = (() => {
+    const STORAGE_KEY = 'finfam_data_v2';
+    const SESSION_KEY = 'finfam_session';
+    const DEFAULT_TOKEN = 'FinFam_SecureToken_2026_@Key';
+    const INACTIVITY_TIMEOUT = 15 * 60 * 1000;
 
-    // ==================== ESTADO DA APLICAÇÃO ====================
     let state = {
-        currentUser: null,
         users: [],
         transactions: [],
         categories: [],
-        investments: [],
-        goals: [],
-        fixedExpenses: [],
-        settings: {
-            googleScriptUrl: '',
-            apiToken: DEFAULT_TOKEN,
-            currencyES: 'EUR',
-            currencyBR: 'BRL',
-            exchangeRate: 6.10,
-            sessionTimeout: 30,
-            theme: 'light'
+        settings: { 
+            currencyBR: 'R$', 
+            currencyES: '€', 
+            monthStartDay: 1, 
+            googleScriptUrl: '', 
+            privacyMode: false,
+            apiToken: DEFAULT_TOKEN
         },
         selectedMonth: new Date().toISOString().slice(0, 7),
-        filterCountry: 'ALL',
-        filterType: 'ALL'
+        sessionExpiry: null,
+        currentUser: null
     };
 
-    let charts = {};
-    let sessionTimer = null;
     let inactivityTimer = null;
     let isDriveConnected = false;
     let isSyncing = false;
 
     // ==================== UTILITÁRIOS ====================
-    // Normalizador seguro de datas (suporta DD/MM/AAAA, AAAA-MM-DD e objetos Date)
     const parseDateToYMD = (val) => {
         if (!val) return '';
         const s = String(val).trim();
@@ -70,10 +62,10 @@ const FinFam = (() => {
 
     const generateId = () => '_' + Math.random().toString(36).substr(2, 9);
     
-    const fmtMoney = (val, currency = 'EUR') => {
-        const symbol = currency === 'BRL' ? 'R$' : '€';
+    const fmtMoney = (val, currency = '€') => {
+        if (state.settings.privacyMode) return '••••••';
         const num = Number(val) || 0;
-        return `${symbol} ${num.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return `${currency} ${num.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.')}`;
     };
 
     const fmtDate = d => {
@@ -89,14 +81,20 @@ const FinFam = (() => {
     const el = id => document.getElementById(id);
 
     const showToast = (msg, type = 'success') => {
-        const toast = el('toast');
-        if (!toast) return;
-        toast.textContent = msg;
-        toast.className = `toast ${type} show`;
+        let toast = el('toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'toast';
+            toast.className = 'toast';
+            document.body.appendChild(toast);
+        }
+        toast.className = `toast ${type}`;
+        toast.innerText = msg;
+        toast.classList.add('show');
         setTimeout(() => toast.classList.remove('show'), 3500);
     };
 
-    // Overlay com barra de progresso real (0% a 100%)
+    // Overlay com barra de progresso (0% a 100%)
     const setConnectionProgress = (pct, text) => {
         let ov = el('finfamConnectionOverlay');
         if (!ov) {
@@ -160,9 +158,51 @@ const FinFam = (() => {
         { id: 'cat_outros_br', name: 'Compromissos Diversos', type: 'expense', country: 'BR', icon: '📋' }
     ];
 
-    const getCategoryById = (catId) => {
-        if (!catId) return { name: 'Geral', icon: '📋', type: 'expense' };
-        return state.categories.find(c => c.id === catId) || { name: 'Geral', icon: '📋', type: 'expense' };
+    // ==================== PERSISTÊNCIA ====================
+    const saveState = () => {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (e) {
+            console.error('Error saving state:', e);
+        }
+    };
+
+    const initState = () => {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+            try {
+                const parsed = JSON.parse(raw);
+                state = parsed;
+                state.categories = [...defaultCategories];
+                if (!state.selectedMonth) state.selectedMonth = new Date().toISOString().slice(0, 7);
+                if (!state.settings) {
+                    state.settings = { 
+                        currencyBR: 'R$', 
+                        currencyES: '€', 
+                        monthStartDay: 1, 
+                        googleScriptUrl: '', 
+                        privacyMode: false,
+                        apiToken: DEFAULT_TOKEN
+                    };
+                }
+                if (!state.settings.apiToken) {
+                    state.settings.apiToken = DEFAULT_TOKEN;
+                }
+            } catch (e) {
+                console.error('Error parsing state:', e);
+            }
+        } else {
+            state.categories = [...defaultCategories];
+            state.settings = { 
+                currencyBR: 'R$', 
+                currencyES: '€', 
+                monthStartDay: 1, 
+                googleScriptUrl: '', 
+                privacyMode: false,
+                apiToken: DEFAULT_TOKEN
+            };
+            saveState();
+        }
     };
 
     // ==================== SINCRONIZAÇÃO GOOGLE DRIVE ====================
@@ -211,7 +251,7 @@ const FinFam = (() => {
         try {
             isSyncing = true;
             setConnectionProgress(35, 'Conectando ao banco de dados...');
-            if (!silent) showToast('🔄 Sincronizando com o Drive...', 'info');
+            if (!silent) showToast('🔄 Sincronizando com o Google Drive...', 'info');
             
             const res = await fetch(url, {
                 method: 'POST',
@@ -222,11 +262,12 @@ const FinFam = (() => {
                 })
             });
             
-            setConnectionProgress(70, 'Processando dados da planilha...');
+            setConnectionProgress(75, 'Processando dados recebidos...');
             const data = await res.json();
             console.log('📥 Dados do Drive:', data);
             
-            if (data.status === 'success' && Array.isArray(data.transactions)) {
+            if (data.status === 'success') {
+                hideConnectionOverlay();
                 console.log(`📊 Recebidos ${data.transactions.length} registros do Drive`);
                 
                 const normalized = data.transactions.map(t => {
@@ -247,13 +288,13 @@ const FinFam = (() => {
                 
                 const driveMap = new Map(normalized.map(t => [String(t.id), t]));
                 const localPending = (state.transactions || []).filter(lt => !driveMap.has(String(lt.id)));
-                
                 state.transactions = [...normalized, ...localPending];
                 isDriveConnected = true;
-                setConnectionProgress(100, 'Sincronização concluída!');
-                hideConnectionOverlay();
                 saveState();
-                refreshAllViews();
+                
+                renderDashboard();
+                renderTransactions();
+                renderReports();
                 
                 const monthPicker = el('dashMonthPicker');
                 if (monthPicker) monthPicker.value = state.selectedMonth;
@@ -277,9 +318,6 @@ const FinFam = (() => {
         }
     };
 
-    // ============================================================
-    // syncFromDriveForce - FORÇA SUBSTITUIÇÃO
-    // ============================================================
     const syncFromDriveForce = async () => {
         if (!confirm('⚠️ Isso vai SUBSTITUIR TODOS os dados locais pelos dados do Drive. Continuar?')) {
             return;
@@ -306,7 +344,6 @@ const FinFam = (() => {
             const data = await res.json();
             
             if (data.status === 'success' && Array.isArray(data.transactions)) {
-                // SUBSTITUIÇÃO DIRETA (sem mesclagem)
                 state.transactions = data.transactions.map(t => {
                     const rawDate = t.date || t.Data || '';
                     const normalizedDate = parseDateToYMD(rawDate) || new Date().toISOString().slice(0, 10);
@@ -324,7 +361,9 @@ const FinFam = (() => {
                 
                 isDriveConnected = true;
                 saveState();
-                refreshAllViews();
+                renderDashboard();
+                renderTransactions();
+                renderReports();
                 showToast(`✅ ${state.transactions.length} registros restaurados do Drive!`);
             } else {
                 showToast('❌ Nenhum dado retornado do Drive.', 'error');
@@ -370,340 +409,212 @@ const FinFam = (() => {
         }
     };
 
-    // ==================== PERSISTÊNCIA LOCAL ====================
-    const saveState = () => {
-        try {
-            localStorage.setItem('finfam_state', JSON.stringify({
-                currentUser: state.currentUser,
-                users: state.users,
-                transactions: state.transactions,
-                categories: state.categories,
-                investments: state.investments,
-                goals: state.goals,
-                fixedExpenses: state.fixedExpenses,
-                settings: state.settings,
-                selectedMonth: state.selectedMonth
-            }));
-        } catch (e) {
-            console.error('Error saving state:', e);
+    const resetDriveData = async () => {
+        if (!confirm('⚠️ ATENÇÃO: Isso vai LIMPAR TODA A PLANILHA no Google Drive! Tem certeza?')) return;
+        if (!confirm('⚠️ CONFIRMAÇÃO FINAL: Todos os dados da planilha serão apagados! Continuar?')) return;
+        
+        const url = state.settings.googleScriptUrl;
+        if (!url) {
+            showToast('⚠️ URL do Google Drive não configurada.', 'error');
+            return;
         }
-    };
-
-    const loadState = () => {
+        
         try {
-            const saved = localStorage.getItem('finfam_state');
-            if (saved) {
-                const parsed = JSON.parse(saved);
-                state = {
-                    ...state,
-                    ...parsed,
-                    settings: { ...state.settings, ...(parsed.settings || {}) },
-                    categories: (parsed.categories && parsed.categories.length) ? parsed.categories : defaultCategories
-                };
+            showToast('🔄 Limpando planilha no Drive...', 'info');
+            
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                    action: 'reset',
+                    token: state.settings.apiToken || DEFAULT_TOKEN
+                })
+            });
+            
+            const data = await res.json();
+            
+            if (data.status === 'success') {
+                showToast('✅ Planilha do Google Drive foi limpa!');
+                checkConnection();
             } else {
-                state.categories = defaultCategories;
-                state.settings.googleScriptUrl = DEFAULT_SCRIPT_URL;
-                state.users = [
-                    { id: 'usr_1', name: 'Administrador', email: 'admin@finfam.com', role: 'admin', pin: '1234' }
-                ];
+                showToast(data.message || '❌ Erro ao limpar planilha.', 'error');
             }
         } catch (e) {
-            console.error('Error loading state:', e);
-            state.categories = defaultCategories;
+            console.error('❌ Erro reset drive:', e);
+            showToast('❌ Falha na conexão com o Drive.', 'error');
         }
     };
 
-    // ==================== CONTROLE DE SESSÃO ====================
-    const resetInactivityTimer = () => {
-        if (inactivityTimer) clearTimeout(inactivityTimer);
-        const timeoutMinutes = state.settings.sessionTimeout || 30;
-        inactivityTimer = setTimeout(() => {
-            showToast('⚠️ Sessão expirada por inatividade.', 'warning');
-            logout();
-        }, timeoutMinutes * 60 * 1000);
+    const resetAllData = () => {
+        if (!confirm('⚠️ ATENÇÃO: Isso vai apagar TODOS os lançamentos e configurações locais! Continuar?')) return;
+        if (!confirm('⚠️ Tem certeza absoluta? Essa ação não pode ser desfeita!')) return;
+        
+        localStorage.removeItem(STORAGE_KEY);
+        sessionStorage.removeItem(SESSION_KEY);
+        
+        showToast('🗑️ Dados locais apagados. Recarregando...', 'warning');
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
     };
 
-    const setupInactivityListeners = () => {
-        ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart'].forEach(evt => {
-            document.addEventListener(evt, resetInactivityTimer, true);
+    const cleanGhostData = () => {
+        const before = state.transactions.length;
+        
+        state.transactions = state.transactions.filter(t => {
+            const hasValidDesc = t.description && t.description.trim() !== '';
+            const hasValidAmount = t.amount && Number(t.amount) > 0;
+            const hasValidDate = t.date && t.date.trim() !== '';
+            return hasValidDesc || hasValidAmount || hasValidDate;
         });
-        resetInactivityTimer();
+        
+        const removed = before - state.transactions.length;
+        
+        if (removed > 0) {
+            saveState();
+            renderDashboard();
+            renderTransactions();
+            renderReports();
+            syncToDrive();
+            showToast(`🧹 ${removed} registros vazios/fantasmas foram removidos!`);
+        } else {
+            showToast('✅ Nenhum dado fantasma encontrado.');
+        }
     };
 
-    const startSessionCountdown = () => {
-        if (sessionTimer) clearInterval(sessionTimer);
-        const updateCountdown = () => {
-            const timerEl = el('sessionCountdown');
-            if (!timerEl) return;
-            const remaining = Math.max(0, 30);
-            timerEl.textContent = `${remaining}m`;
-        };
-        updateCountdown();
-        sessionTimer = setInterval(updateCountdown, 60000);
+    // ==================== CONTROLE DE MÊS ====================
+    const changeSelectedMonth = (newMonth) => {
+        state.selectedMonth = newMonth;
+        saveState();
+        
+        const dashPicker = el('dashMonthPicker');
+        if (dashPicker) dashPicker.value = newMonth;
+        
+        const reportPicker = el('reportMonthPicker');
+        if (reportPicker) reportPicker.value = newMonth;
+        
+        renderDashboard();
+        renderTransactions();
+        
+        const reportContainer = el('reportContainer');
+        if (reportContainer) {
+            reportContainer.innerHTML = renderMonthlyReport();
+        }
     };
 
     // ==================== AUTENTICAÇÃO ====================
-    const login = (email, pin) => {
-        const user = state.users.find(u => u.email.toLowerCase() === email.toLowerCase() && u.pin === pin);
-        if (user) {
-            state.currentUser = user;
-            saveState();
-            renderApp();
-            showToast(`👋 Bem-vindo(a), ${user.name}!`);
-            setupInactivityListeners();
-            startSessionCountdown();
-            if (state.settings.googleScriptUrl) {
-                setConnectionProgress(15, 'Conectando ao banco de dados...');
-                syncFromDrive(true);
+    const getSession = () => {
+        const raw = sessionStorage.getItem(SESSION_KEY);
+        if (!raw) return null;
+        try {
+            const s = JSON.parse(raw);
+            if (new Date(s.expires) < new Date()) {
+                sessionStorage.removeItem(SESSION_KEY);
+                return null;
             }
-            return true;
+            return s;
+        } catch (e) {
+            return null;
         }
-        showToast('❌ E-mail ou PIN incorretos.', 'error');
-        return false;
+    };
+
+    const setSession = (userId, hours = 12) => {
+        const expires = new Date(Date.now() + hours * 3600000).toISOString();
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ userId, expires }));
+        state.currentUser = state.users.find(u => u.id === userId);
+        state.sessionExpiry = expires;
+        resetInactivityTimer();
+    };
+
+    const resetInactivityTimer = () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+            showToast('⚠️ Sessão expirada por inatividade.', 'error');
+            logout();
+        }, INACTIVITY_TIMEOUT);
+    };
+
+    const hashPwd = async (pwd) => {
+        const enc = new TextEncoder().encode(pwd);
+        const buf = await crypto.subtle.digest('SHA-256', enc);
+        return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+    };
+
+    const isSetup = () => state.users && state.users.length > 0;
+    const isLoggedIn = () => {
+        const s = getSession();
+        if (!s) return false;
+        state.currentUser = state.users.find(u => u.id === s.userId);
+        return !!state.currentUser;
+    };
+
+    const doSetup = async () => {
+        const name = el('setupName')?.value.trim();
+        const email = el('setupEmail')?.value.trim().toLowerCase();
+        const pwd = el('setupPwd')?.value;
+        const pwd2 = el('setupPwd2')?.value;
+        if (!name || !email || !pwd) {
+            showToast('⚠️ Preencha todos os campos.', 'error');
+            return;
+        }
+        if (pwd !== pwd2) {
+            showToast('❌ As senhas não conferem.', 'error');
+            return;
+        }
+        if (pwd.length < 6) {
+            showToast('⚠️ A senha deve ter no mínimo 6 caracteres.', 'error');
+            return;
+        }
+        const user = {
+            id: generateId(),
+            name,
+            email,
+            passwordHash: await hashPwd(pwd),
+            role: 'admin',
+            createdAt: new Date().toISOString()
+        };
+        state.users = [user];
+        saveState();
+        setSession(user.id);
+        renderApp();
+        showToast('🎉 Família configurada com sucesso!');
+        if (state.settings.googleScriptUrl) syncFromDrive(true);
+    };
+
+    const doLogin = async () => {
+        const email = el('loginEmail')?.value.trim().toLowerCase();
+        const pwd = el('loginPwd')?.value;
+        if (!email || !pwd) {
+            showToast('⚠️ Preencha email e senha.', 'error');
+            return;
+        }
+        const user = state.users.find(u => String(u.email).toLowerCase() === email);
+        if (!user) { 
+            showToast('❌ Usuário não encontrado.', 'error'); 
+            return; 
+        }
+        const hash = await hashPwd(pwd);
+        if (user.passwordHash !== hash) { 
+            showToast('❌ Senha incorreta.', 'error'); 
+            return; 
+        }
+        setSession(user.id);
+        renderApp();
+        showToast(`👋 Bem-vindo(a), ${user.name}!`);
+        if (state.settings.googleScriptUrl) syncFromDrive(true);
     };
 
     const logout = () => {
+        sessionStorage.removeItem(SESSION_KEY);
         state.currentUser = null;
-        if (sessionTimer) clearInterval(sessionTimer);
         if (inactivityTimer) clearTimeout(inactivityTimer);
+        renderLogin();
+    };
+
+    const togglePrivacy = () => {
+        state.settings.privacyMode = !state.settings.privacyMode;
         saveState();
         renderApp();
-        showToast('🔒 Você saiu do sistema.');
-    };
-
-    // ==================== CÁLCULOS FINANCEIROS ====================
-    const getSelectedMonthData = () => {
-        const ym = state.selectedMonth;
-        const txs = state.transactions.filter(t => {
-            if (!t || !t.date) return false;
-            return getYearMonth(t.date) === ym;
-        }).sort((a, b) => {
-            const da = parseDateToYMD(a.date);
-            const db = parseDateToYMD(b.date);
-            return db.localeCompare(da);
-        });
-
-        const incomeES = txs.filter(t => t.country === 'ES' && t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
-        const expenseES = txs.filter(t => t.country === 'ES' && t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
-        const investES = txs.filter(t => t.country === 'ES' && t.type === 'investment').reduce((acc, t) => acc + t.amount, 0);
-
-        const incomeBR = txs.filter(t => t.country === 'BR' && t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
-        const expenseBR = txs.filter(t => t.country === 'BR' && t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
-        const investBR = txs.filter(t => t.country === 'BR' && t.type === 'investment').reduce((acc, t) => acc + t.amount, 0);
-
-        const balanceES = incomeES - expenseES - investES;
-        const balanceBR = incomeBR - expenseBR - investBR;
-
-        const rate = state.settings.exchangeRate || 6.10;
-        const netWorthEUR = balanceES + (balanceBR / rate);
-
-        return {
-            transactions: txs,
-            incomeES, expenseES, investES, balanceES,
-            incomeBR, expenseBR, investBR, balanceBR,
-            netWorthEUR,
-            totalIncomeEUR: incomeES + (incomeBR / rate),
-            totalExpenseEUR: expenseES + (expenseBR / rate),
-            totalInvestEUR: investES + (investBR / rate)
-        };
-    };
-
-    // ==================== RENDERIZADORES DE TELA ====================
-    const renderLogin = () => `
-        <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--navy) 0%, #0f172a 100%); padding: 20px;">
-            <div class="card" style="width: 100%; max-width: 420px; padding: 40px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);">
-                <div style="text-align: center; margin-bottom: 32px;">
-                    <div style="width: 64px; height: 64px; background: var(--navy); border-radius: 16px; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 16px;">
-                        <span style="font-size: 32px;">🏰</span>
-                    </div>
-                    <h1 style="color: var(--navy); margin: 0 0 8px 0; font-size: 24px; font-weight: 700;">FinFam</h1>
-                    <p style="color: var(--text-light); margin: 0; font-size: 14px;">Controle Financeiro Familiar Multimoeda</p>
-                </div>
-                <form id="loginForm" onsubmit="event.preventDefault(); FinFam.handleLogin();">
-                    <div class="form-group">
-                        <label class="form-label">E-mail</label>
-                        <input type="email" id="loginEmail" class="input-field" placeholder="seu@email.com" required value="admin@finfam.com">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">PIN de Acesso</label>
-                        <input type="password" id="loginPin" class="input-field" placeholder="••••" maxlength="8" required value="1234">
-                    </div>
-                    <button type="submit" class="btn-primary" style="width: 100%; padding: 12px; margin-top: 8px;">Entrar no Sistema</button>
-                </form>
-                <div style="margin-top: 24px; text-align: center; font-size: 12px; color: var(--text-light);">
-                    🇪🇸 Espanha (€) &bull; 🇧🇷 Brasil (R$) &bull; Google Drive Sync
-                </div>
-            </div>
-        </div>
-    `;
-
-    const renderSidebar = () => `
-        <aside class="sidebar">
-            <div class="logo">
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <span style="font-size: 28px;">🏰</span>
-                    <div>
-                        <div style="font-weight: 700; font-size: 18px; letter-spacing: -0.5px;">FinFam</div>
-                        <div style="font-size: 11px; opacity: 0.7;">Finanças Familiares</div>
-                    </div>
-                </div>
-            </div>
-            <nav style="flex: 1; padding: 16px 0;">
-                <button class="nav-item active" data-page="dashboard" onclick="FinFam.nav(this)">
-                    <span>📊</span> Dashboard
-                </button>
-                <button class="nav-item" data-page="transactions" onclick="FinFam.nav(this)">
-                    <span>💳</span> Lançamentos
-                </button>
-                <button class="nav-item" data-page="investments" onclick="FinFam.nav(this)">
-                    <span>📈</span> Patrimônio
-                </button>
-                <button class="nav-item" data-page="reports" onclick="FinFam.nav(this)">
-                    <span>📑</span> Relatórios
-                </button>
-                ${state.currentUser && state.currentUser.role === 'admin' ? `
-                    <button class="nav-item" data-page="settings" onclick="FinFam.nav(this)">
-                        <span>⚙️</span> Configurações
-                    </button>
-                ` : ''}
-            </nav>
-            <div style="padding: 20px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
-                    <div class="user-avatar">${(state.currentUser?.name || 'U').charAt(0)}</div>
-                    <div style="flex: 1; overflow: hidden;">
-                        <div style="font-weight: 600; font-size: 14px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden;">
-                            ${state.currentUser?.name}
-                        </div>
-                        <div style="font-size: 11px; opacity: 0.7;">
-                            ${state.currentUser?.role === 'admin' ? 'Administrador' : 'Membro'}
-                        </div>
-                    </div>
-                </div>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span style="font-size: 11px; opacity: 0.6;">Sessão: <span id="sessionCountdown">30m</span></span>
-                    <button onclick="FinFam.logout()" style="background: none; border: none; color: #f87171; cursor: pointer; font-size: 12px; font-weight: 500;">
-                        Sair 🚪
-                    </button>
-                </div>
-            </div>
-        </aside>
-    `;
-
-    const renderDashboard = () => {
-        const data = getSelectedMonthData();
-        return `
-            <div id="dashboard" class="page active">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-                    <div>
-                        <h1 style="color: var(--navy); margin: 0 0 4px 0; font-size: 24px; font-weight: 700;">Painel Financeiro</h1>
-                        <p style="color: var(--text-light); margin: 0; font-size: 14px;">Visão consolidada das finanças familiares</p>
-                    </div>
-                    <div style="display: flex; gap: 12px; align-items: center;">
-                        <input type="month" id="dashMonthPicker" class="input-field" value="${state.selectedMonth}" onchange="FinFam.changeMonth(this.value)" style="width: auto;">
-                        <button class="btn-primary" onclick="FinFam.showTransactionModal()">+ Novo Lançamento</button>
-                        <button class="btn-secondary" onclick="FinFam.syncFromDrive()" title="Atualizar do Drive">🔄 Sincronizar</button>
-                    </div>
-                </div>
-
-                <!-- CARDS DE PATRIMÔNIO TOTAL -->
-                <div class="card net-worth-card" style="padding: 24px; margin-bottom: 24px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
-                        <div>
-                            <div class="stat-label">Saldo Líquido Estimado do Mês (Total em Euros)</div>
-                            <div class="net-worth-value">${fmtMoney(data.netWorthEUR, 'EUR')}</div>
-                            <div style="font-size: 12px; color: var(--text-light); margin-top: 4px;">
-                                Câmbio ref.: 1 EUR = R$ ${(state.settings.exchangeRate || 6.10).toFixed(2)}
-                            </div>
-                        </div>
-                        <div style="display: flex; gap: 24px;">
-                            <div style="text-align: right;">
-                                <div class="stat-label">Total Entradas (€)</div>
-                                <div style="font-size: 20px; font-weight: 700; color: var(--emerald);">${fmtMoney(data.totalIncomeEUR, 'EUR')}</div>
-                            </div>
-                            <div style="text-align: right;">
-                                <div class="stat-label">Total Saídas (€)</div>
-                                <div style="font-size: 20px; font-weight: 700; color: var(--danger);">${fmtMoney(data.totalExpenseEUR, 'EUR')}</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- BLOCO ESPANHA -->
-                <h3 style="color: var(--navy); margin: 24px 0 12px 0; display: flex; align-items: center; gap: 8px;">
-                    <span>🇪🇸</span> Finanças na Espanha (EUR)
-                </h3>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
-                    <div class="card stat-card">
-                        <div class="stat-label">Receitas (ES)</div>
-                        <div class="stat-value emerald-text">${fmtMoney(data.incomeES, 'EUR')}</div>
-                    </div>
-                    <div class="card stat-card">
-                        <div class="stat-label">Despesas (ES)</div>
-                        <div class="stat-value danger-text">${fmtMoney(data.expenseES, 'EUR')}</div>
-                    </div>
-                    <div class="card stat-card">
-                        <div class="stat-label">Investimentos (ES)</div>
-                        <div class="stat-value" style="color: var(--purple);">${fmtMoney(data.investES, 'EUR')}</div>
-                    </div>
-                    <div class="card stat-card">
-                        <div class="stat-label">Saldo do Mês (ES)</div>
-                        <div class="stat-value ${data.balanceES >= 0 ? 'emerald-text' : 'danger-text'}">
-                            ${fmtMoney(data.balanceES, 'EUR')}
-                        </div>
-                    </div>
-                </div>
-
-                <!-- BLOCO BRASIL -->
-                <h3 style="color: var(--navy); margin: 24px 0 12px 0; display: flex; align-items: center; gap: 8px;">
-                    <span>🇧🇷</span> Finanças no Brasil (BRL)
-                </h3>
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
-                    <div class="card stat-card">
-                        <div class="stat-label">Receitas (BR)</div>
-                        <div class="stat-value emerald-text">${fmtMoney(data.incomeBR, 'BRL')}</div>
-                    </div>
-                    <div class="card stat-card">
-                        <div class="stat-label">Despesas (BR)</div>
-                        <div class="stat-value danger-text">${fmtMoney(data.expenseBR, 'BRL')}</div>
-                    </div>
-                    <div class="card stat-card">
-                        <div class="stat-label">Investimentos (BR)</div>
-                        <div class="stat-value" style="color: var(--purple);">${fmtMoney(data.investBR, 'BRL')}</div>
-                    </div>
-                    <div class="card stat-card">
-                        <div class="stat-label">Saldo do Mês (BR)</div>
-                        <div class="stat-value ${data.balanceBR >= 0 ? 'emerald-text' : 'danger-text'}">
-                            ${fmtMoney(data.balanceBR, 'BRL')}
-                        </div>
-                    </div>
-                </div>
-
-                <!-- GRÁFICOS -->
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px; margin-bottom: 24px;">
-                    <div class="card" style="padding: 20px;">
-                        <h4 style="margin: 0 0 16px 0; color: var(--navy);">Despesas por Categoria (Espanha)</h4>
-                        <div style="height: 260px; position: relative;">
-                            <canvas id="chartExpensesES"></canvas>
-                        </div>
-                    </div>
-                    <div class="card" style="padding: 20px;">
-                        <h4 style="margin: 0 0 16px 0; color: var(--navy);">Comparativo Receitas vs Despesas</h4>
-                        <div style="height: 260px; position: relative;">
-                            <canvas id="chartComparison"></canvas>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- ÚLTIMOS LANÇAMENTOS -->
-                <div class="card" style="padding: 20px;">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                        <h4 style="margin: 0; color: var(--navy);">Últimas Movimentações do Mês</h4>
-                        <button class="btn-secondary" onclick="FinFam.nav(document.querySelector('[data-page=transactions]'))">Ver Todas</button>
-                    </div>
-                    ${renderTransactionsTable(data.transactions.slice(0, 5))}
-                </div>
-            </div>
-        `;
     };
     // ==================== RENDER TRANSAÇÕES ====================
     const renderTransactionRow = (t) => {
