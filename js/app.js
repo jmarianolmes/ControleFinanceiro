@@ -1,7 +1,7 @@
 // ============================================================
 // FinFam — Controle Financeiro Familiar
 // Arquivo: js/app.js
-// Versão: 3.0 (corrigida, alinhada ao contrato da API)
+// Versão: 3.1 (aporte/resgate + PDF corrigido + duplo câmbio)
 // ============================================================
 
 const App = (() => {
@@ -36,24 +36,24 @@ const App = (() => {
 
     // ==================== CATEGORIAS PADRÃO ====================
     const defaultCategories = [
-        { id: 'cat_salario_es',        name: 'Salário / Emprego',              type: 'income',     country: 'ES', icon: '💼' },
-        { id: 'cat_freelance_es',      name: 'Trabalho Freelance / Extras',    type: 'income',     country: 'ES', icon: '💻' },
-        { id: 'cat_outras_entradas_es',name: 'Outras Receitas',                type: 'income',     country: 'ES', icon: '💶' },
-        { id: 'cat_rendimentos',       name: 'Rendimentos & Dividendos',       type: 'income',     country: 'ES', icon: '💰' },
-        { id: 'cat_aluguel_br_inc',    name: 'Receita Aluguel',                type: 'income',     country: 'BR', icon: '🏠' },
-        { id: 'cat_invest',            name: 'Investimentos',                  type: 'investment', country: 'ES', icon: '📈' },
-        { id: 'cat_aluguel_es',        name: 'Aluguel de Moradia',             type: 'expense',    country: 'ES', icon: '🔑' },
-        { id: 'cat_hipoteca_es',       name: 'Hipoteca / Financiamento',       type: 'expense',    country: 'ES', icon: '🏛️' },
-        { id: 'cat_mercado',           name: 'Mercado / Alimentação',          type: 'expense',    country: 'ES', icon: '🛒' },
-        { id: 'cat_agua',              name: 'Água',                           type: 'expense',    country: 'ES', icon: '💧' },
-        { id: 'cat_luz',               name: 'Energia / Luz',                  type: 'expense',    country: 'ES', icon: '⚡' },
-        { id: 'cat_gas',               name: 'Gás',                            type: 'expense',    country: 'ES', icon: '🔥' },
-        { id: 'cat_escola',            name: 'Escola / Crianças',              type: 'expense',    country: 'ES', icon: '🎒' },
-        { id: 'cat_veiculo',           name: 'Veículo / Transporte',           type: 'expense',    country: 'ES', icon: '🚗' },
-        { id: 'cat_lazer',             name: 'Lazer & Família',                type: 'expense',    country: 'ES', icon: '🎬' },
-        { id: 'cat_outros_es',         name: 'Outras Despesas',                type: 'expense',    country: 'ES', icon: '📋' },
-        { id: 'cat_cc_br',             name: 'Cartão de Crédito',              type: 'expense',    country: 'BR', icon: '💳' },
-        { id: 'cat_outros_br',         name: 'Compromissos Diversos',          type: 'expense',    country: 'BR', icon: '🇧🇷' }
+        { id: 'cat_salario_es',         name: 'Salário / Emprego',           type: 'income',     country: 'ES', icon: '💼' },
+        { id: 'cat_freelance_es',       name: 'Trabalho Freelance / Extras', type: 'income',     country: 'ES', icon: '💻' },
+        { id: 'cat_outras_entradas_es', name: 'Outras Receitas',             type: 'income',     country: 'ES', icon: '💶' },
+        { id: 'cat_rendimentos',        name: 'Rendimentos & Dividendos',    type: 'income',     country: 'ES', icon: '💰' },
+        { id: 'cat_aluguel_br_inc',     name: 'Receita Aluguel',             type: 'income',     country: 'BR', icon: '🏠' },
+        { id: 'cat_invest',             name: 'Investimentos',               type: 'investment', country: 'ES', icon: '📈' },
+        { id: 'cat_aluguel_es',         name: 'Aluguel de Moradia',          type: 'expense',    country: 'ES', icon: '🔑' },
+        { id: 'cat_hipoteca_es',        name: 'Hipoteca / Financiamento',    type: 'expense',    country: 'ES', icon: '🏛️' },
+        { id: 'cat_mercado',            name: 'Mercado / Alimentação',       type: 'expense',    country: 'ES', icon: '🛒' },
+        { id: 'cat_agua',               name: 'Água',                        type: 'expense',    country: 'ES', icon: '💧' },
+        { id: 'cat_luz',                name: 'Energia / Luz',               type: 'expense',    country: 'ES', icon: '⚡' },
+        { id: 'cat_gas',                name: 'Gás',                         type: 'expense',    country: 'ES', icon: '🔥' },
+        { id: 'cat_escola',             name: 'Escola / Crianças',           type: 'expense',    country: 'ES', icon: '🎒' },
+        { id: 'cat_veiculo',            name: 'Veículo / Transporte',        type: 'expense',    country: 'ES', icon: '🚗' },
+        { id: 'cat_lazer',              name: 'Lazer & Família',             type: 'expense',    country: 'ES', icon: '🎬' },
+        { id: 'cat_outros_es',          name: 'Outras Despesas',             type: 'expense',    country: 'ES', icon: '📋' },
+        { id: 'cat_cc_br',              name: 'Cartão de Crédito',           type: 'expense',    country: 'BR', icon: '💳' },
+        { id: 'cat_outros_br',          name: 'Compromissos Diversos',       type: 'expense',    country: 'BR', icon: '🇧🇷' }
     ];
 
     // ==================== UTILITÁRIOS ====================
@@ -212,6 +212,8 @@ const App = (() => {
                     };
                 }
                 if (!state.settings.apiToken) state.settings.apiToken = DEFAULT_TOKEN;
+                if (!Array.isArray(state.users)) state.users = [];
+                if (!Array.isArray(state.transactions)) state.transactions = [];
             } catch(e) { resetState(); }
         } else {
             resetState();
@@ -279,7 +281,7 @@ const App = (() => {
         setTimeout(() => el('connOverlay')?.remove(), 350);
     };
 
-    // ==================== GOOGLE DRIVE (contrato oficial) ====================
+    // ==================== GOOGLE DRIVE ====================
     const driveCall = async (payload) => {
         const url = state.settings.googleScriptUrl;
         if (!url) throw new Error('URL do Google Apps Script não configurada.');
@@ -289,7 +291,15 @@ const App = (() => {
             body: JSON.stringify({ ...payload, token: state.settings.apiToken || DEFAULT_TOKEN })
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
+        const text = await res.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            // Resposta não é JSON — provavelmente erro do Apps Script
+            throw new Error(`Resposta inválida do Drive: ${text.slice(0, 120)}`);
+        }
+        return data;
     };
 
     const checkConnection = async () => {
@@ -298,13 +308,13 @@ const App = (() => {
         showToast('🔄 Testando conexão...', 'info');
         try {
             const data = await driveCall({ action: 'ping' });
-            if (data.status === 'ok' || data.status === 'success') {
+            if (data?.status === 'ok' || data?.status === 'success') {
                 showToast('✅ Conexão com o Google Drive ativa!', 'success');
             } else {
-                showToast(`⚠️ ${data.message || 'Resposta inesperada.'}`, 'warning');
+                showToast(`⚠️ ${data?.message || 'Resposta inesperada.'}`, 'warning');
             }
         } catch (e) {
-            showToast('❌ Falha ao conectar ao Google Drive.', 'error');
+            showToast('❌ Falha ao conectar: ' + (e.message || 'erro desconhecido'), 'error');
         }
     };
 
@@ -323,10 +333,10 @@ const App = (() => {
                     lastSync: new Date().toISOString()
                 }
             });
-            if (data.status === 'ok' || data.status === 'success') {
+            if (data?.status === 'ok' || data?.status === 'success') {
                 showToast(`✅ ${state.transactions.length} registros salvos no Drive!`);
             } else {
-                showToast(data.message || '❌ Erro ao salvar no Drive.', 'error');
+                showToast(data?.message || '❌ Erro ao salvar no Drive.', 'error');
             }
         } catch (e) {
             console.error('syncToDrive:', e);
@@ -334,28 +344,38 @@ const App = (() => {
         }
     };
 
-    const normalizeTx = (t) => ({
-        id:           t.id || t.ID || ('tx_' + generateId()),
-        type:         t.type || t.Tipo || 'expense',
-        date:         parseDateToYMD(t.date || t.Data) || new Date().toISOString().slice(0,10),
-        description:  t.description || t['Descrição'] || '',
-        categoryId:   t.categoryId || t.CategoriaID || 'cat_outros_es',
-        country:      (t.country || t['País'] || 'ES').toString().toUpperCase().slice(0,2),
-        amount:       Number(t.amount ?? t.Valor ?? 0) || 0,
-        assignedTo:   t.assignedTo || t['Responsável'] || 'Casal / Ambos',
-        createdAt:    t.createdAt || new Date().toISOString(),
-        updatedAt:    t.updatedAt || t.createdAt || new Date().toISOString()
-    });
+    const normalizeTx = (t) => {
+        if (!t || typeof t !== 'object') return null;
+        const type = (t.type || t.Tipo || 'expense').toString().toLowerCase();
+        const isInv = type === 'investment';
+        return {
+            id:           t.id || t.ID || ('tx_' + generateId()),
+            type:         ['expense','income','investment'].includes(type) ? type : 'expense',
+            date:         parseDateToYMD(t.date || t.Data) || new Date().toISOString().slice(0,10),
+            description:  t.description || t['Descrição'] || '',
+            categoryId:   t.categoryId || t.CategoriaID || 'cat_outros_es',
+            country:      (t.country || t['País'] || 'ES').toString().toUpperCase().slice(0,2),
+            amount:       Number(t.amount ?? t.Valor ?? 0) || 0,
+            assignedTo:   t.assignedTo || t['Responsável'] || 'Casal / Ambos',
+            investAction: isInv ? ((t.investAction || t.action || 'aporte').toString().toLowerCase() === 'resgate' ? 'resgate' : 'aporte') : undefined,
+            createdAt:    t.createdAt || new Date().toISOString(),
+            updatedAt:    t.updatedAt || t.createdAt || new Date().toISOString()
+        };
+    };
 
     const mergeDriveData = (remote) => {
-        const remoteTxs = (remote.transactions || []).map(normalizeTx);
+        if (!remote || typeof remote !== 'object') return { localOnlyCount: 0, remoteCount: 0 };
+
+        const remoteRaw = Array.isArray(remote.transactions) ? remote.transactions
+                        : Array.isArray(remote)               ? remote
+                        : [];
+        const remoteTxs = remoteRaw.map(normalizeTx).filter(Boolean);
         const remoteIds = new Set(remoteTxs.map(t => t.id));
         const localOnly = state.transactions.filter(t => !remoteIds.has(t.id));
 
         state.transactions = [...remoteTxs, ...localOnly];
 
         if (Array.isArray(remote.users) && remote.users.length > 0) {
-            // Mescla por email
             const map = new Map(state.users.map(u => [u.email, u]));
             remote.users.forEach(u => { if (u?.email) map.set(u.email, u); });
             state.users = Array.from(map.values());
@@ -374,20 +394,33 @@ const App = (() => {
         try {
             if (!silent) showToast('🔄 Sincronizando com o Drive...', 'info');
             const data = await driveCall({ action: 'fetch' });
-            const payload = data.data || data;
 
-            if ((data.status === 'ok' || data.status === 'success') && Array.isArray(payload.transactions)) {
-                const { localOnlyCount } = mergeDriveData(payload);
+            // Aceita vários formatos sem quebrar
+            const payload =
+                (data && typeof data === 'object' && data.data && typeof data.data === 'object') ? data.data :
+                (data && typeof data === 'object') ? data : {};
+
+            const ok = data?.status === 'ok' || data?.status === 'success';
+
+            if (ok && (Array.isArray(payload.transactions) || Array.isArray(data?.transactions))) {
+                const merged = {
+                    ...payload,
+                    transactions: payload.transactions || data.transactions || []
+                };
+                const { localOnlyCount } = mergeDriveData(merged);
                 saveState();
                 refreshAllViews();
                 if (!silent) showToast(`✅ ${state.transactions.length} registros sincronizados!`);
                 if (localOnlyCount > 0) syncToDrive();
+            } else if (ok && !payload.transactions) {
+                // Drive vazio mas resposta válida — não é erro, apenas não há nada remoto
+                if (!silent) showToast('ℹ️ Drive sem dados ainda. Base local preservada.', 'info');
             } else if (!silent) {
-                showToast(data.message || '❌ Erro ao consultar o Drive.', 'error');
+                showToast(data?.message || '❌ Erro ao consultar o Drive.', 'error');
             }
         } catch (e) {
             console.error('syncFromDrive:', e);
-            if (!silent) showToast('❌ Erro ao consultar o Drive.', 'error');
+            if (!silent) showToast('❌ ' + (e.message || 'Erro ao consultar o Drive.'), 'error');
         }
     };
 
@@ -396,25 +429,49 @@ const App = (() => {
         await syncFromDrive(false);
     };
 
-    // ==================== FILTROS E CÁLCULOS ====================
+    // ==================== CÁLCULOS (com aporte/resgate) ====================
+    // Helpers para classificar movimentação de investimento
+    const isAporte = (t) => t.type === 'investment' && (t.investAction || 'aporte') !== 'resgate';
+    const isResgate = (t) => t.type === 'investment' && (t.investAction || 'aporte') === 'resgate';
+
+    const calcMonth = (txs) => {
+        const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
+        const income       = sum(txs.filter(t => t.type === 'income'));
+        const expense      = sum(txs.filter(t => t.type === 'expense'));
+        const aportes      = sum(txs.filter(isAporte));
+        const resgates     = sum(txs.filter(isResgate));
+        const investment   = aportes - resgates;               // líquido do mês
+        const balance      = income - expense - aportes + resgates;
+        return { income, expense, investment, aportes, resgates, balance };
+    };
+
+    const calcTotals = () => {
+        const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
+        const allAportes  = sum(state.transactions.filter(isAporte));
+        const allResgates = sum(state.transactions.filter(isResgate));
+        const totalInvestments = allAportes - allResgates;      // patrimônio acumulado
+        const totalIncomeAll   = sum(state.transactions.filter(t => t.type === 'income'));
+        const totalExpenseAll  = sum(state.transactions.filter(t => t.type === 'expense'));
+        const netWorth = totalInvestments + (totalIncomeAll - totalExpenseAll - allAportes + allResgates);
+        return { totalInvestments, totalIncomeAll, totalExpenseAll, allAportes, allResgates, netWorth };
+    };
+
     const getSelectedMonthData = () => {
         const ym = state.selectedMonth || new Date().toISOString().slice(0,7);
         const txs = state.transactions
             .filter(t => t && t.date && getYearMonth(t.date) === ym)
             .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
 
-        const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
-        const income     = sum(txs.filter(t => t.type === 'income'));
-        const expense    = sum(txs.filter(t => t.type === 'expense'));
-        const investment = sum(txs.filter(t => t.type === 'investment'));
-        const balance    = income - expense - investment;
+        const month  = calcMonth(txs);
+        const totals = calcTotals();
 
-        const totalInvestments = sum(state.transactions.filter(t => t.type === 'investment'));
-        const totalIncomeAll   = sum(state.transactions.filter(t => t.type === 'income'));
-        const totalExpenseAll  = sum(state.transactions.filter(t => t.type === 'expense'));
-        const netWorth = totalInvestments + (totalIncomeAll - totalExpenseAll - totalInvestments);
+        // Duplo câmbio: separa o mês por país
+        const esTxs = txs.filter(t => t.country === 'ES');
+        const brTxs = txs.filter(t => t.country === 'BR');
+        const monthES = calcMonth(esTxs);
+        const monthBR = calcMonth(brTxs);
 
-        return { ym, txs, income, expense, investment, balance, netWorth, totalInvestments };
+        return { ym, txs, ...month, ...totals, monthES, monthBR };
     };
 
     const changeSelectedMonth = (m) => {
@@ -567,6 +624,25 @@ const App = (() => {
         refreshAllViews();
     };
 
+    // -------- Badge de tipo (com aporte/resgate) --------
+    const renderTypeBadge = (t) => {
+        if (t.type === 'income')  return '<span class="badge badge-success">Receita</span>';
+        if (t.type === 'expense') return '<span class="badge badge-danger">Despesa</span>';
+        if (isResgate(t))         return '<span class="badge badge-warning">Resgate</span>';
+        return '<span class="badge badge-purple">Aporte</span>';
+    };
+
+    const renderTxValue = (t, cur) => {
+        const color = t.type === 'income' ? 'var(--emerald)'
+                    : t.type === 'expense' ? 'var(--danger)'
+                    : isResgate(t) ? 'var(--warning)'
+                    : 'var(--purple)';
+        const sign = t.type === 'income' ? '+'
+                   : t.type === 'expense' ? '-'
+                   : isResgate(t) ? '+' : '-';
+        return `<span style="font-weight:600;color:${color}">${sign}${fmtMoney(t.amount, cur)}</span>`;
+    };
+
     // -------- DASHBOARD --------
     const renderDashboard = () => {
         const m = getSelectedMonthData();
@@ -578,50 +654,66 @@ const App = (() => {
                     <h1 style="color:var(--navy);margin:0 0 4px;font-size:24px">Visão Geral</h1>
                     <p style="color:var(--text-light);margin:0;font-size:14px">Resumo consolidado das finanças familiares</p>
                 </div>
-                <div style="display:flex;gap:12px;align-items:center">
+                <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
                     <input type="month" class="input-field" value="${m.ym}" onchange="App.changeSelectedMonth(this.value)" style="width:auto">
                     <button class="btn-primary" onclick="App.showTransactionModal(null)">+ Novo Lançamento</button>
                 </div>
             </div>
 
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+            <h3 style="color:var(--text-light);font-size:12px;text-transform:uppercase;letter-spacing:.8px;margin:0 0 10px">🇪🇸 Movimento em Euros (€)</h3>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px">
                 <div class="card stat-card">
-                    <div class="stat-label">Saldo Livre</div>
-                    <div class="stat-value ${m.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.balance, state.settings.currencyES)}</div>
+                    <div class="stat-label">Saldo Livre €</div>
+                    <div class="stat-value ${m.monthES.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.monthES.balance, '€')}</div>
                 </div>
                 <div class="card stat-card">
-                    <div class="stat-label">Receitas</div>
-                    <div class="stat-value emerald-text">${fmtMoney(m.income, state.settings.currencyES)}</div>
+                    <div class="stat-label">Receitas €</div>
+                    <div class="stat-value emerald-text">${fmtMoney(m.monthES.income, '€')}</div>
                 </div>
                 <div class="card stat-card">
-                    <div class="stat-label">Despesas</div>
-                    <div class="stat-value danger-text">${fmtMoney(m.expense, state.settings.currencyES)}</div>
+                    <div class="stat-label">Despesas €</div>
+                    <div class="stat-value danger-text">${fmtMoney(m.monthES.expense, '€')}</div>
                 </div>
                 <div class="card stat-card" style="border-left:4px solid #8b5cf6">
-                    <div class="stat-label">Investimentos / Aportes</div>
-                    <div class="stat-value" style="color:#8b5cf6">${fmtMoney(m.investment, state.settings.currencyES)}</div>
-                </div>
-                <div class="card stat-card net-worth-card">
-                    <div class="stat-label">🏦 Patrimônio Total</div>
-                    <div class="net-worth-value">${fmtMoney(m.netWorth, state.settings.currencyES)}</div>
-                    <div style="font-size:11px;color:var(--text-light);margin-top:4px">
-                        Investimentos Acumulados: ${fmtMoney(m.totalInvestments, state.settings.currencyES)}
-                    </div>
+                    <div class="stat-label">Aportes €</div>
+                    <div class="stat-value" style="color:#8b5cf6">${fmtMoney(m.monthES.aportes, '€')}</div>
+                    ${m.monthES.resgates > 0 ? `<div style="font-size:11px;color:var(--warning);margin-top:4px">Resgates: ${fmtMoney(m.monthES.resgates, '€')}</div>` : ''}
                 </div>
             </div>
 
-            <div style="display:grid;grid-template-columns:2fr 1fr;gap:24px;margin-bottom:24px">
-                <div class="card" style="padding:24px">
-                    <h3 style="color:var(--navy);margin-top:0">Fluxo Mensal</h3>
-                    <div style="height:240px"><canvas id="monthlyChart"></canvas></div>
+            <h3 style="color:var(--text-light);font-size:12px;text-transform:uppercase;letter-spacing:.8px;margin:0 0 10px">🇧🇷 Movimento em Reais (R$)</h3>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
+                <div class="card stat-card">
+                    <div class="stat-label">Saldo Livre R$</div>
+                    <div class="stat-value ${m.monthBR.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.monthBR.balance, 'R$')}</div>
                 </div>
-                <div class="card" style="padding:24px">
-                    <h3 style="color:var(--navy);margin-top:0">Ações Rápidas</h3>
-                    <div style="display:flex;flex-direction:column;gap:12px;margin-top:16px">
-                        <button class="btn-primary" onclick="App.showTransactionModal(null)">+ Registrar Lançamento</button>
-                        <button class="btn-secondary" onclick="App.syncFromDriveForce()">🔄 Sincronizar Drive</button>
-                    </div>
+                <div class="card stat-card">
+                    <div class="stat-label">Receitas R$</div>
+                    <div class="stat-value emerald-text">${fmtMoney(m.monthBR.income, 'R$')}</div>
                 </div>
+                <div class="card stat-card">
+                    <div class="stat-label">Despesas R$</div>
+                    <div class="stat-value danger-text">${fmtMoney(m.monthBR.expense, 'R$')}</div>
+                </div>
+                <div class="card stat-card" style="border-left:4px solid #8b5cf6">
+                    <div class="stat-label">Aportes R$</div>
+                    <div class="stat-value" style="color:#8b5cf6">${fmtMoney(m.monthBR.aportes, 'R$')}</div>
+                    ${m.monthBR.resgates > 0 ? `<div style="font-size:11px;color:var(--warning);margin-top:4px">Resgates: ${fmtMoney(m.monthBR.resgates, 'R$')}</div>` : ''}
+                </div>
+            </div>
+
+            <div class="card stat-card net-worth-card" style="margin-bottom:24px">
+                <div class="stat-label">🏦 Patrimônio Total (Investimentos Acumulados)</div>
+                <div class="net-worth-value">${fmtMoney(m.totalInvestments, state.settings.currencyES)}</div>
+                <div style="font-size:12px;color:var(--text-light);margin-top:6px">
+                    Aportes totais: ${fmtMoney(m.allAportes, '€')} &nbsp;•&nbsp;
+                    Resgates totais: ${fmtMoney(m.allResgates, '€')}
+                </div>
+            </div>
+
+            <div class="card" style="padding:24px;margin-bottom:24px">
+                <h3 style="color:var(--navy);margin-top:0">Fluxo Mensal (Euros)</h3>
+                <div style="height:240px"><canvas id="monthlyChart"></canvas></div>
             </div>
 
             <div class="card" style="padding:24px">
@@ -644,13 +736,6 @@ const App = (() => {
                                 : recent.map(t => {
                                     const cat = getCategoryDisplay(t.categoryId);
                                     const cur = t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES;
-                                    const isExp = t.type === 'expense';
-                                    const isInc = t.type === 'income';
-                                    const badge = isExp ? '<span class="badge badge-danger">Despesa</span>'
-                                                : isInc ? '<span class="badge badge-success">Receita</span>'
-                                                : '<span class="badge badge-purple">Investimento</span>';
-                                    const color = isExp ? 'var(--danger)' : isInc ? 'var(--emerald)' : 'var(--purple)';
-                                    const sign  = isExp ? '-' : isInc ? '+' : '';
                                     return `
                                         <tr>
                                             <td>${fmtDate(t.date)}</td>
@@ -658,8 +743,8 @@ const App = (() => {
                                             <td>${cat.icon} ${cat.name}</td>
                                             <td>${t.assignedTo || 'Casal'}</td>
                                             <td>${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</td>
-                                            <td>${badge}</td>
-                                            <td style="text-align:right;font-weight:600;color:${color}">${sign}${fmtMoney(t.amount, cur)}</td>
+                                            <td>${renderTypeBadge(t)}</td>
+                                            <td style="text-align:right">${renderTxValue(t, cur)}</td>
                                         </tr>`;
                                 }).join('')}
                         </tbody>
@@ -677,11 +762,11 @@ const App = (() => {
         chartInstance = new Chart(canvas.getContext('2d'), {
             type: 'bar',
             data: {
-                labels: ['Receitas', 'Despesas', 'Investimentos'],
+                labels: ['Receitas', 'Despesas', 'Aportes', 'Resgates'],
                 datasets: [{
-                    label: 'Valores no Mês',
-                    data: [m.income, m.expense, m.investment],
-                    backgroundColor: ['#059669', '#dc2626', '#8b5cf6'],
+                    label: 'Euros no Mês',
+                    data: [m.monthES.income, m.monthES.expense, m.monthES.aportes, m.monthES.resgates],
+                    backgroundColor: ['#059669', '#dc2626', '#8b5cf6', '#d97706'],
                     borderRadius: 6
                 }]
             },
@@ -689,7 +774,7 @@ const App = (() => {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: { legend: { display: false } },
-                scales: { y: { beginAtZero: true, ticks: { callback: v => fmtMoney(v, state.settings.currencyES) } } }
+                scales: { y: { beginAtZero: true, ticks: { callback: v => fmtMoney(v, '€') } } }
             }
         });
     };
@@ -728,13 +813,6 @@ const App = (() => {
                                 : txs.map(t => {
                                     const cat = getCategoryDisplay(t.categoryId);
                                     const cur = t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES;
-                                    const isExp = t.type === 'expense';
-                                    const isInc = t.type === 'income';
-                                    const badge = isExp ? '<span class="badge badge-danger">Despesa</span>'
-                                                : isInc ? '<span class="badge badge-success">Receita</span>'
-                                                : '<span class="badge badge-purple">Investimento</span>';
-                                    const color = isExp ? 'var(--danger)' : isInc ? 'var(--emerald)' : 'var(--purple)';
-                                    const sign  = isExp ? '-' : isInc ? '+' : '';
                                     return `
                                         <tr>
                                             <td>${fmtDate(t.date)}</td>
@@ -742,8 +820,8 @@ const App = (() => {
                                             <td>${cat.icon} ${cat.name}</td>
                                             <td>${t.assignedTo || 'Casal'}</td>
                                             <td>${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</td>
-                                            <td>${badge}</td>
-                                            <td style="text-align:right;font-weight:600;color:${color}">${sign}${fmtMoney(t.amount, cur)}</td>
+                                            <td>${renderTypeBadge(t)}</td>
+                                            <td style="text-align:right">${renderTxValue(t, cur)}</td>
                                             <td style="text-align:center;white-space:nowrap">
                                                 <button onclick="App.showTransactionModal('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px" title="Editar">✏️</button>
                                                 <button onclick="App.deleteTransaction('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px" title="Excluir">🗑️</button>
@@ -763,11 +841,18 @@ const App = (() => {
             .filter(t => t && t.date && getYearMonth(t.date) === selMonth)
             .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
 
-        const filterBy = (country, type) => txs.filter(t => t.country === country && t.type === type);
+        const filterBy = (country, predicate) => txs.filter(t => t.country === country && predicate(t));
         const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
 
-        const expES = filterBy('ES','expense'), incES = filterBy('ES','income'), invES = filterBy('ES','investment');
-        const expBR = filterBy('BR','expense'), incBR = filterBy('BR','income'), invBR = filterBy('BR','investment');
+        const expES = filterBy('ES', t => t.type === 'expense');
+        const incES = filterBy('ES', t => t.type === 'income');
+        const apoES = filterBy('ES', isAporte);
+        const resES = filterBy('ES', isResgate);
+
+        const expBR = filterBy('BR', t => t.type === 'expense');
+        const incBR = filterBy('BR', t => t.type === 'income');
+        const apoBR = filterBy('BR', isAporte);
+        const resBR = filterBy('BR', isResgate);
 
         const section = (title, items, total, cur, badgeClass, prefix) => `
             <div class="card" style="padding:24px;margin-bottom:24px">
@@ -803,7 +888,7 @@ const App = (() => {
             </div>`;
 
         return `
-            <div id="reportContainer">
+            <div id="reportContainer" style="background:#fff">
                 <div class="no-print" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:16px">
                     <div>
                         <h2 style="color:var(--navy);margin:0 0 4px 0">Relatório Mensal</h2>
@@ -817,50 +902,82 @@ const App = (() => {
                 </div>
 
                 <h2 style="color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px;margin-bottom:16px">🇪🇸 Espanha</h2>
-                ${section('Despesas em Espanha',   expES, sum(expES), state.settings.currencyES, 'badge-danger',  '-')}
-                ${section('Receitas em Espanha',   incES, sum(incES), state.settings.currencyES, 'badge-success', '+')}
-                ${section('Investimentos em Espanha', invES, sum(invES), state.settings.currencyES, 'badge-purple', '')}
+                ${section('Despesas em Espanha',       expES, sum(expES), state.settings.currencyES, 'badge-danger',  '-')}
+                ${section('Receitas em Espanha',       incES, sum(incES), state.settings.currencyES, 'badge-success', '+')}
+                ${section('Aportes em Espanha',        apoES, sum(apoES), state.settings.currencyES, 'badge-purple',  '-')}
+                ${section('Resgates em Espanha',       resES, sum(resES), state.settings.currencyES, 'badge-warning', '+')}
 
                 <h2 style="color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px;margin:28px 0 16px">🇧🇷 Brasil</h2>
-                ${section('Despesas no Brasil',   expBR, sum(expBR), state.settings.currencyBR, 'badge-danger',  '-')}
-                ${section('Receitas no Brasil',   incBR, sum(incBR), state.settings.currencyBR, 'badge-success', '+')}
-                ${section('Investimentos no Brasil', invBR, sum(invBR), state.settings.currencyBR, 'badge-purple', '')}
+                ${section('Despesas no Brasil',        expBR, sum(expBR), state.settings.currencyBR, 'badge-danger',  '-')}
+                ${section('Receitas no Brasil',        incBR, sum(incBR), state.settings.currencyBR, 'badge-success', '+')}
+                ${section('Aportes no Brasil',         apoBR, sum(apoBR), state.settings.currencyBR, 'badge-purple',  '-')}
+                ${section('Resgates no Brasil',        resBR, sum(resBR), state.settings.currencyBR, 'badge-warning', '+')}
             </div>`;
     };
 
-    // -------- EXPORTAÇÕES --------
+    // -------- EXPORTAÇÃO PDF (CORRIGIDA) --------
     const exportToPDF = () => {
         const container = el('reportContainer');
         if (!container) { showToast('Relatório não renderizado.', 'error'); return; }
+        if (typeof html2pdf === 'undefined') { showToast('Biblioteca PDF não carregada.', 'error'); return; }
 
+        showToast('📄 Gerando PDF...', 'info');
+
+        // Clone visualmente acessível (não use left:-9999px nem display:none)
         const clone = container.cloneNode(true);
         clone.querySelectorAll('.no-print').forEach(n => n.remove());
         clone.id = 'pdfTempExportContainer';
-        clone.style.cssText = 'position:absolute;left:-9999px;top:0;width:1000px;background:#fff;padding:20px;';
+        clone.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 900px;
+            background: #ffffff;
+            padding: 24px;
+            z-index: -1;
+            opacity: 0.001;
+            pointer-events: none;
+            overflow: visible;
+        `;
 
         document.body.appendChild(clone);
-        showToast('📄 Gerando PDF...', 'info');
+
+        // Força reflow antes de capturar
+        void clone.offsetHeight;
 
         const opt = {
-            margin: 10,
+            margin: [8, 8, 8, 8],
             filename: `FinFam_Relatorio_${state.selectedMonth || 'mensal'}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2, useCORS: true, logging: false, windowWidth: 1000 },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            image: { type: 'jpeg', quality: 0.95 },
+            html2canvas: {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff',
+                windowWidth: 900,
+                scrollX: 0,
+                scrollY: 0
+            },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['css', 'legacy'] }
         };
 
-        html2pdf().set(opt).from(clone).save()
-            .then(() => {
-                clone.remove();
-                showToast('✅ PDF gerado com sucesso!', 'success');
-            })
-            .catch(err => {
-                console.error('exportToPDF:', err);
-                clone.remove();
-                showToast('Erro ao exportar PDF.', 'error');
-            });
+        // Delay curto garante que o navegador pintou o clone
+        setTimeout(() => {
+            html2pdf().set(opt).from(clone).save()
+                .then(() => {
+                    clone.remove();
+                    showToast('✅ PDF gerado com sucesso!', 'success');
+                })
+                .catch(err => {
+                    console.error('exportToPDF:', err);
+                    clone.remove();
+                    showToast('Erro ao exportar PDF.', 'error');
+                });
+        }, 200);
     };
 
+    // -------- EXPORTAÇÃO CSV --------
     const exportToCSV = () => {
         const ym = state.selectedMonth || new Date().toISOString().slice(0,7);
         const txs = state.transactions
@@ -870,29 +987,36 @@ const App = (() => {
         if (txs.length === 0) { showToast('Nenhum dado para exportar neste mês.', 'info'); return; }
 
         const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
-        const f = (c,t) => sum(txs.filter(x => x.country === c && x.type === t));
         const fmt = (n) => n.toFixed(2).replace('.', ',');
 
-        const expES = f('ES','expense'), incES = f('ES','income'), invES = f('ES','investment');
-        const expBR = f('BR','expense'), incBR = f('BR','income'), invBR = f('BR','investment');
+        const by = (c, pred) => sum(txs.filter(t => t.country === c && pred(t)));
+        const expES = by('ES', t => t.type === 'expense'), incES = by('ES', t => t.type === 'income');
+        const apoES = by('ES', isAporte),                 resES = by('ES', isResgate);
+        const expBR = by('BR', t => t.type === 'expense'), incBR = by('BR', t => t.type === 'income');
+        const apoBR = by('BR', isAporte),                 resBR = by('BR', isResgate);
 
         let csv = 'sep=;\r\n';
         csv += `RELATÓRIO MENSAL FINFAM;Mês: ${ym};Data da Exportação: ${new Date().toLocaleDateString('pt-BR')}\r\n\r\n`;
         csv += 'RESUMO CONSOLIDADO\r\n';
-        csv += `Espanha (EUR);Receitas: ${fmt(incES)};Despesas: ${fmt(expES)};Investimentos: ${fmt(invES)};Saldo: ${fmt(incES-expES-invES)}\r\n`;
-        csv += `Brasil (BRL);Receitas: ${fmt(incBR)};Despesas: ${fmt(expBR)};Investimentos: ${fmt(invBR)};Saldo: ${fmt(incBR-expBR-invBR)}\r\n\r\n`;
+        csv += `Espanha (EUR);Receitas: ${fmt(incES)};Despesas: ${fmt(expES)};Aportes: ${fmt(apoES)};Resgates: ${fmt(resES)};Saldo: ${fmt(incES-expES-apoES+resES)}\r\n`;
+        csv += `Brasil (BRL);Receitas: ${fmt(incBR)};Despesas: ${fmt(expBR)};Aportes: ${fmt(apoBR)};Resgates: ${fmt(resBR)};Saldo: ${fmt(incBR-expBR-apoBR+resBR)}\r\n\r\n`;
         csv += 'DETALHAMENTO DE LANÇAMENTOS\r\n';
-        csv += 'Data;Descrição;Categoria;Responsável;País;Tipo;Valor Formatado;Valor Numérico;Moeda\r\n';
+        csv += 'Data;Descrição;Categoria;Responsável;País;Tipo;Movimento;Valor Formatado;Valor Numérico;Moeda\r\n';
 
         txs.forEach(t => {
             const cat = getCategoryDisplay(t.categoryId);
             const cur = t.country === 'BR' ? 'BRL' : 'EUR';
-            const typeStr = t.type === 'expense' ? 'Despesa' : t.type === 'income' ? 'Receita' : 'Investimento';
+            const typeStr = t.type === 'expense' ? 'Despesa'
+                          : t.type === 'income'  ? 'Receita'
+                          : 'Investimento';
+            const movement = t.type === 'investment' ? (isResgate(t) ? 'Resgate' : 'Aporte') : '';
             const numVal = (Number(t.amount) || 0).toFixed(2).replace('.', ',');
-            const sign   = t.type === 'expense' ? '-' : t.type === 'income' ? '+' : '';
+            const sign = t.type === 'expense' ? '-'
+                       : t.type === 'income'  ? '+'
+                       : isResgate(t) ? '+' : '-';
             const desc = (t.description || '').replace(/;/g, ',');
             const resp = (t.assignedTo || 'Casal').replace(/;/g, ',');
-            csv += `${fmtDate(t.date)};${desc};${cat.name};${resp};${t.country || 'ES'};${typeStr};"${sign}${numVal}";${numVal};${cur}\r\n`;
+            csv += `${fmtDate(t.date)};${desc};${cat.name};${resp};${t.country || 'ES'};${typeStr};${movement};"${sign}${numVal}";${numVal};${cur}\r\n`;
         });
 
         const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -1034,10 +1158,11 @@ const App = (() => {
         location.reload();
     };
 
-    // -------- MODAL DE LANÇAMENTO --------
+    // -------- MODAL DE LANÇAMENTO (com aporte/resgate) --------
     const showTransactionModal = (txId) => {
         const tx = txId ? state.transactions.find(t => t.id === txId) : null;
         const isInvestment = tx ? tx.type === 'investment' : false;
+        const investAction = tx?.investAction || 'aporte';
 
         const overlay = el('modalOverlay');
         const content = el('modalContent');
@@ -1056,16 +1181,29 @@ const App = (() => {
                     <select id="txType" class="input-field" onchange="App.onTxTypeChange(this.value)">
                         <option value="expense"    ${tx?.type === 'expense'    ? 'selected' : ''}>Despesa</option>
                         <option value="income"     ${tx?.type === 'income'     ? 'selected' : ''}>Receita</option>
-                        <option value="investment" ${isInvestment              ? 'selected' : ''}>Investimento / Aporte</option>
+                        <option value="investment" ${isInvestment              ? 'selected' : ''}>Investimento (Aporte / Resgate)</option>
                     </select>
                 </div>
+
+                <div class="form-group" id="investActionGroup" style="${isInvestment ? '' : 'display:none;'}">
+                    <label class="form-label">Movimento de Investimento</label>
+                    <select id="txInvestAction" class="input-field">
+                        <option value="aporte"  ${investAction === 'aporte'  ? 'selected' : ''}>💰 Aporte — guardar na reserva</option>
+                        <option value="resgate" ${investAction === 'resgate' ? 'selected' : ''}>💸 Resgate — usar para pagar contas</option>
+                    </select>
+                    <div style="font-size:11px;color:var(--text-light);margin-top:6px;line-height:1.4">
+                        <strong>Aporte:</strong> reduz o Saldo Livre e aumenta o Patrimônio.<br>
+                        <strong>Resgate:</strong> devolve valor ao Saldo Livre para uso no mês.
+                    </div>
+                </div>
+
                 <div class="form-group">
                     <label class="form-label">Data</label>
                     <input type="date" id="txDate" class="input-field" value="${defaultDate}" required>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Descrição</label>
-                    <input type="text" id="txDescription" class="input-field" value="${tx ? (tx.description || '') : ''}" placeholder="Ex: Mercado, Salário, etc." required>
+                    <input type="text" id="txDescription" class="input-field" value="${tx ? (tx.description || '') : ''}" placeholder="Ex: Mercado, Salário, Aporte mensal..." required>
                 </div>
                 <div class="form-group" id="categoryGroup" style="${isInvestment ? 'display:none;' : ''}">
                     <label class="form-label">Categoria</label>
@@ -1111,8 +1249,10 @@ const App = (() => {
 
     const onTxTypeChange = (type) => {
         const catGroup = el('categoryGroup');
-        if (!catGroup) return;
-        catGroup.style.display = type === 'investment' ? 'none' : 'block';
+        const actionGroup = el('investActionGroup');
+        const isInv = type === 'investment';
+        if (catGroup)    catGroup.style.display    = isInv ? 'none' : 'block';
+        if (actionGroup) actionGroup.style.display = isInv ? 'block' : 'none';
     };
 
     const saveTransaction = (e, txId) => {
@@ -1123,6 +1263,7 @@ const App = (() => {
         const country     = el('txCountry').value;
         const amount      = parseFloat(el('txAmount').value);
         const assignedTo  = el('txAssignedTo').value;
+        const investAction = type === 'investment' ? (el('txInvestAction')?.value || 'aporte') : undefined;
 
         const categoryId = type === 'investment'
             ? getInvestmentCategory().id
@@ -1142,6 +1283,7 @@ const App = (() => {
                     ...state.transactions[idx],
                     type, date: cleanYMD, description, categoryId,
                     country, amount, assignedTo,
+                    investAction,
                     updatedAt: new Date().toISOString()
                 };
             }
@@ -1150,6 +1292,7 @@ const App = (() => {
                 id: 'tx_' + generateId(),
                 type, date: cleanYMD, description, categoryId,
                 country, amount, assignedTo,
+                investAction,
                 createdAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString()
             });
@@ -1159,7 +1302,12 @@ const App = (() => {
         closeModal();
         refreshAllViews();
         syncToDrive();
-        showToast(txId ? 'Lançamento atualizado!' : 'Lançamento registrado!', 'success');
+
+        const msg = txId ? 'Lançamento atualizado!'
+                  : type === 'investment'
+                    ? (investAction === 'resgate' ? '💸 Resgate registrado!' : '💰 Aporte registrado!')
+                    : 'Lançamento registrado!';
+        showToast(msg, 'success');
     };
 
     const deleteTransaction = (txId) => {
@@ -1214,7 +1362,6 @@ const App = (() => {
     const init = () => {
         initState();
 
-        // Eventos de atividade para resetar o timeout
         ['click','keydown','mousemove','touchstart'].forEach(evt =>
             document.addEventListener(evt, resetInactivityTimer, { passive: true })
         );
