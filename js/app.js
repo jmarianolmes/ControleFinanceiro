@@ -1071,7 +1071,7 @@ const App = (() => {
     // ============================================================
     // PDF — IFRAME ISOLADO
     // ============================================================
-    const exportToPDF = () => {
+   const exportToPDF = () => {
     if (typeof html2pdf === 'undefined') {
         showToast('Biblioteca PDF não carregada.', 'error');
         return;
@@ -1145,77 +1145,75 @@ const App = (() => {
         block('BR', '🇧🇷 Brasil', 'R$') +
         '</div>';
 
-    // ---------- IFRAME ISOLADO ----------
-    const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;left:-2000px;top:0;width:900px;height:1200px;border:0;background:#fff;';
-    document.body.appendChild(iframe);
+    // ---------- CONTAINER VISÍVEL MAS INVISÍVEL (opacity 0) ----------
+    // Fica no canto superior esquerdo, na tela, mas com opacity 0.
+    // html2canvas captura a posição REAL sem deslocamento.
+    const container = document.createElement('div');
+    container.id = 'pdfRenderContainer';
+    container.style.cssText =
+        'position:fixed;' +
+        'top:0;' +
+        'left:0;' +
+        'width:900px;' +
+        'background:#ffffff;' +
+        'padding:0;' +
+        'margin:0;' +
+        'opacity:0;' +                 // invisível
+        'pointer-events:none;' +       // não intercepta cliques
+        'z-index:-1;' +                // atrás de tudo
+        'overflow:visible;';
+    container.innerHTML = htmlContent;
+    document.body.appendChild(container);
 
-    const idoc = iframe.contentDocument || iframe.contentWindow.document;
-    idoc.open();
-    idoc.write(
-        '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
-        '<style>html,body{margin:0;padding:0;background:#fff;}</style>' +
-        '</head><body>' + htmlContent + '</body></html>'
-    );
-    idoc.close();
-
-    // Espera paint
     const waitForPaint = () => new Promise(resolve => {
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-                setTimeout(resolve, 300);
+                setTimeout(resolve, 400);
             });
         });
     });
 
-    // Mede ALTURA REAL do conteúdo — resolve o corte
-    const getFullHeight = () => {
-        const body = idoc.body;
-        const html = idoc.documentElement;
-        return Math.max(
-            body.scrollHeight, body.offsetHeight,
-            html.clientHeight, html.scrollHeight, html.offsetHeight
-        );
-    };
+    waitForPaint().then(() => {
+        // Mede as dimensões REAIS do container
+        const rect = container.getBoundingClientRect();
+        const fullWidth  = Math.max(container.scrollWidth,  container.offsetWidth,  900);
+        const fullHeight = Math.max(container.scrollHeight, container.offsetHeight);
 
-    iframe.onload = () => {
-        waitForPaint().then(() => {
-            const fullHeight = getFullHeight();
+        const opt = {
+            margin: [8, 8, 8, 8],
+            filename: 'FinFam_Relatorio_' + selMonth + '.pdf',
+            image: { type: 'jpeg', quality: 0.95 },
+            html2canvas: {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff',
+                width: fullWidth,
+                height: fullHeight,
+                windowWidth: fullWidth,
+                windowHeight: fullHeight,
+                x: 0,                    // ✅ captura a partir do x=0 do elemento
+                y: 0,                    // ✅ captura a partir do y=0 do elemento
+                scrollX: 0,
+                scrollY: 0,
+                allowTaint: true,
+                foreignObjectRendering: false
+            },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+            pagebreak: { mode: ['css', 'legacy'] }
+        };
 
-            const opt = {
-                margin: [8, 8, 8, 8],
-                filename: 'FinFam_Relatorio_' + selMonth + '.pdf',
-                image: { type: 'jpeg', quality: 0.95 },
-                html2canvas: {
-                    scale: 2,
-                    useCORS: true,
-                    logging: false,
-                    backgroundColor: '#ffffff',
-                    width: 900,
-                    height: fullHeight,          // ✅ altura real
-                    windowWidth: 900,
-                    windowHeight: fullHeight,    // ✅ captura inteira
-                    scrollX: 0,
-                    scrollY: 0,
-                    allowTaint: true,
-                    foreignObjectRendering: false
-                },
-                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-                pagebreak: { mode: ['css', 'legacy'] }
-            };
-
-            html2pdf().set(opt).from(idoc.body).save()
-                .then(() => {
-                    iframe.remove();
-                    showToast('✅ PDF gerado com sucesso!', 'success');
-                })
-                .catch(err => {
-                    console.error('exportToPDF:', err);
-                    iframe.remove();
-                    showToast('Erro ao exportar PDF: ' + (err && err.message ? err.message : ''), 'error');
-                });
-        });
-    };
+        html2pdf().set(opt).from(container).save()
+            .then(() => {
+                container.remove();
+                showToast('✅ PDF gerado com sucesso!', 'success');
+            })
+            .catch(err => {
+                console.error('exportToPDF:', err);
+                container.remove();
+                showToast('Erro ao exportar PDF: ' + (err && err.message ? err.message : ''), 'error');
+            });
+    });
 };
     // -------- CSV --------
     const exportToCSV = () => {
