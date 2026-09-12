@@ -444,49 +444,70 @@ const App = (() => {
     };
 
     const syncToDrive = async () => {
-        if (!state.settings.googleScriptUrl) {
-            showToast('⚠️ URL do Google Drive não configurada.', 'error');
-            return;
-        }
-        try {
-            const cleanTx = (state.transactions || []).map(sanitizeTxForDrive).filter(Boolean);
-            const cleanUsers = (state.users || []).filter(u => u && u.email).map(u => ({
-                id: String(u.id || ''),
-                name: String(u.name || ''),
-                email: String(u.email || ''),
-                passwordHash: String(u.passwordHash || ''),
-                role: String(u.role || 'user'),
-                createdAt: String(u.createdAt || new Date().toISOString())
-            }));
-            const cleanSettings = {
-                currencyBR: String(state.settings.currencyBR || 'R$'),
-                currencyES: String(state.settings.currencyES || '€'),
-                monthStartDay: Number(state.settings.monthStartDay) || 1,
-                googleScriptUrl: String(state.settings.googleScriptUrl || ''),
-                apiToken: String(state.settings.apiToken || DEFAULT_TOKEN)
-            };
+    if (!state.settings.googleScriptUrl) {
+        showToast('⚠️ URL do Google Drive não configurada.', 'error');
+        return;
+    }
+    try {
+        const cleanTx = (state.transactions || []).map(sanitizeTxForDrive).filter(Boolean);
+        const cleanUsers = (state.users || []).filter(u => u && u.email).map(u => ({
+            id: String(u.id || ''),
+            name: String(u.name || ''),
+            email: String(u.email || ''),
+            passwordHash: String(u.passwordHash || ''),
+            role: String(u.role || 'user'),
+            createdAt: String(u.createdAt || new Date().toISOString())
+        }));
+        const cleanSettings = {
+            currencyBR: String(state.settings.currencyBR || 'R$'),
+            currencyES: String(state.settings.currencyES || '€'),
+            monthStartDay: Number(state.settings.monthStartDay) || 1,
+            googleScriptUrl: String(state.settings.googleScriptUrl || ''),
+            apiToken: String(state.settings.apiToken || DEFAULT_TOKEN)
+        };
 
-            const data = await driveCall({
-                action: 'sync',
-                data: {
-                    transactions: cleanTx,
-                    users: cleanUsers,
-                    settings: cleanSettings,
-                    lastSync: new Date().toISOString()
-                }
-            });
+        const url = state.settings.googleScriptUrl;
+        const token = state.settings.apiToken || DEFAULT_TOKEN;
 
-            if (data && (data.status === 'ok' || data.status === 'success')) {
-                showToast('✅ ' + cleanTx.length + ' registros salvos no Drive!');
-            } else {
-                showToast((data && data.message) || '❌ Erro ao salvar no Drive.', 'error');
+        // ✅ Envia em DUPLO formato:
+        //    transactions na RAIZ (Apps Script atual espera assim)
+        //    + dentro de data{} (compatível com a doc original)
+        const payload = {
+            action: 'sync',
+            token: token,
+            transactions: cleanTx,               // ← Apps Script lê daqui
+            data: {                              // ← compatibilidade futura
+                transactions: cleanTx,
+                users: cleanUsers,
+                settings: cleanSettings,
+                lastSync: new Date().toISOString()
             }
-        } catch (e) {
-            console.error('syncToDrive:', e);
-            showToast('❌ ' + (e.message || 'Erro ao comunicar com o Drive.'), 'error');
-        }
-    };
+        };
 
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+
+        const text = await res.text();
+        let data;
+        try { data = JSON.parse(text); }
+        catch (e) { throw new Error('Resposta não-JSON: ' + text.slice(0, 120)); }
+
+        if (data && (data.status === 'ok' || data.status === 'success')) {
+            showToast('✅ ' + cleanTx.length + ' registros salvos no Drive!');
+        } else {
+            showToast((data && data.message) || '❌ Erro ao salvar no Drive.', 'error');
+        }
+    } catch (e) {
+        console.error('syncToDrive:', e);
+        showToast('❌ ' + (e.message || 'Erro ao comunicar com o Drive.'), 'error');
+    }
+};
+    
     const mergeDriveData = (remote) => {
         if (!remote || typeof remote !== 'object') return { localOnlyCount: 0, remoteCount: 0 };
         const remoteRaw = Array.isArray(remote.transactions) ? remote.transactions
