@@ -1071,113 +1071,95 @@ const App = (() => {
     // ============================================================
     // PDF — IFRAME ISOLADO
     // ============================================================
-   const exportToPDF = () => {
+  const exportToPDF = () => {
     if (typeof html2pdf === 'undefined') {
         showToast('Biblioteca PDF não carregada.', 'error');
         return;
     }
 
+    // Garante que estamos na aba Relatórios
+    const reportEl = el('reportContainer');
+    if (!reportEl) {
+        showToast('Abra a aba Relatórios antes de gerar o PDF.', 'warning');
+        navByPage('reports');
+        setTimeout(exportToPDF, 400);
+        return;
+    }
+
     const selMonth = state.selectedMonth || new Date().toISOString().slice(0,7);
-    const txs = state.transactions
-        .filter(t => t && t.date && getYearMonth(t.date) === selMonth)
-        .filter(afetaMes)
-        .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
 
-    showToast('📄 Gerando PDF...', 'info');
+    // ---------- Overlay escuro (esconde a "piscada" durante a captura) ----------
+    const overlay = document.createElement('div');
+    overlay.id = 'pdfOverlay';
+    overlay.style.cssText =
+        'position:fixed;inset:0;background:rgba(15,23,42,.9);z-index:999998;' +
+        'display:flex;align-items:center;justify-content:center;' +
+        'color:#fff;font-family:Inter,sans-serif;font-size:16px;font-weight:600;';
+    overlay.innerHTML = '<div>📄 Gerando PDF, aguarde...</div>';
+    document.body.appendChild(overlay);
 
-    const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
-    const filterBy = (country, pred) => txs.filter(t => t.country === country && pred(t));
-    const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const money = (v, cur) => cur + ' ' + Number(v||0).toFixed(2).replace('.', ',');
+    // ---------- Esconde botões/inputs do relatório temporariamente ----------
+    const hidden = [];
+    reportEl.querySelectorAll('.no-print, button, input').forEach(n => {
+        hidden.push({ el: n, display: n.style.display });
+        n.style.display = 'none';
+    });
 
-    const buildTable = (items, cur, prefix) => {
-        if (items.length === 0) {
-            return '<p style="color:#64748b;font-size:11px;padding:8px;background:#f8fafc;border-radius:4px;margin:0 0 10px;">Sem registros.</p>';
-        }
-        let rows = '';
-        items.forEach(t => {
-            const cat = getCategoryDisplay(t.categoryId);
-            rows += '<tr>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + fmtDate(t.date) + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.description) + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(cat.name) + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.assignedTo || 'Casal') + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;">' + prefix + money(t.amount, cur) + '</td>' +
-            '</tr>';
-        });
-        return '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;">' +
-            '<thead><tr style="background:#f1f5f9;">' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:70px;">Data</th>' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Descrição</th>' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Categoria</th>' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:100px;">Responsável</th>' +
-                '<th style="padding:6px 8px;text-align:right;border:1px solid #cbd5e1;width:100px;">Valor</th>' +
-            '</tr></thead><tbody>' + rows + '</tbody></table>';
-    };
-
-    const block = (country, label, cur) => {
-        const exp = filterBy(country, t => t.type === 'expense');
-        const inc = filterBy(country, t => t.type === 'income');
-        const apo = filterBy(country, isAporte);
-        const res = filterBy(country, isResgate);
-        return '<div style="margin-bottom:20px;">' +
-            '<h3 style="color:#1e3a5f;font-size:13px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">' + label + '</h3>' +
-            '<p style="font-size:11px;font-weight:600;color:#dc2626;margin:8px 0 4px;">Despesas (' + money(sum(exp), cur) + ')</p>' + buildTable(exp, cur, '-') +
-            '<p style="font-size:11px;font-weight:600;color:#059669;margin:8px 0 4px;">Receitas (' + money(sum(inc), cur) + ')</p>' + buildTable(inc, cur, '+') +
-            '<p style="font-size:11px;font-weight:600;color:#8b5cf6;margin:8px 0 4px;">Aportes (' + money(sum(apo), cur) + ')</p>' + buildTable(apo, cur, '-') +
-            '<p style="font-size:11px;font-weight:600;color:#d97706;margin:8px 0 4px;">Resgates (' + money(sum(res), cur) + ')</p>' + buildTable(res, cur, '+') +
-        '</div>';
-    };
-
-    const totalES = calcMonth(txs.filter(t => t.country === 'ES'));
-    const totalBR = calcMonth(txs.filter(t => t.country === 'BR'));
-
-    const htmlContent =
-        '<div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;background:#fff;padding:20px;">' +
-        '<h1 style="color:#1e3a5f;font-size:18px;margin:0 0 4px;">FinFam — Relatório Mensal</h1>' +
-        '<p style="font-size:11px;color:#64748b;margin:0 0 12px;">Mês: <strong>' + selMonth + '</strong> • Gerado em: ' + new Date().toLocaleString('pt-BR') + '</p>' +
-        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:0 0 16px;">' +
-            '<p style="font-size:11px;margin:0 0 6px;font-weight:600;color:#1e3a5f;">Resumo Consolidado</p>' +
-            '<p style="font-size:10px;margin:2px 0;">🇪🇸 <strong>Espanha:</strong> Receitas ' + money(totalES.income,'€') + ' • Despesas ' + money(totalES.expense,'€') + ' • Aportes ' + money(totalES.aportes,'€') + ' • Resgates ' + money(totalES.resgates,'€') + ' • Saldo <strong>' + money(totalES.balance,'€') + '</strong></p>' +
-            '<p style="font-size:10px;margin:2px 0;">🇧🇷 <strong>Brasil:</strong> Receitas ' + money(totalBR.income,'R$') + ' • Despesas ' + money(totalBR.expense,'R$') + ' • Aportes ' + money(totalBR.aportes,'R$') + ' • Resgates ' + money(totalBR.resgates,'R$') + ' • Saldo <strong>' + money(totalBR.balance,'R$') + '</strong></p>' +
-        '</div>' +
-        block('ES', '🇪🇸 Espanha', '€') +
-        block('BR', '🇧🇷 Brasil', 'R$') +
-        '</div>';
-
-    // ---------- CONTAINER VISÍVEL MAS INVISÍVEL (opacity 0) ----------
-    // Fica no canto superior esquerdo, na tela, mas com opacity 0.
-    // html2canvas captura a posição REAL sem deslocamento.
-    const container = document.createElement('div');
-    container.id = 'pdfRenderContainer';
-    container.style.cssText =
+    // ---------- Clona o relatório para não afetar a tela original ----------
+    // (o clone fica FORA da tela mas o navegador ainda pinta)
+    const clone = reportEl.cloneNode(true);
+    clone.id = 'reportForPdf';
+    clone.style.cssText =
         'position:fixed;' +
         'top:0;' +
         'left:0;' +
-        'width:900px;' +
+        'width:1000px;' +          // largura fixa (A4 ~ 794px @ 96dpi, folga)
+        'min-width:1000px;' +
+        'max-width:1000px;' +
         'background:#ffffff;' +
-        'padding:0;' +
+        'padding:24px;' +
         'margin:0;' +
-        'opacity:0;' +                 // invisível
-        'pointer-events:none;' +       // não intercepta cliques
-        'z-index:-1;' +                // atrás de tudo
-        'overflow:visible;';
-    container.innerHTML = htmlContent;
-    document.body.appendChild(container);
+        'z-index:999999;' +
+        'opacity:0.01;' +           // 99% invisível, mas PINTADO
+        'pointer-events:none;' +
+        'overflow:visible;' +       // <-- CRÍTICO: sem overflow hidden
+        'box-sizing:border-box;' +
+        'font-family:Arial,Helvetica,sans-serif;' +
+        'color:#1e293b;';
 
-    const waitForPaint = () => new Promise(resolve => {
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                setTimeout(resolve, 400);
-            });
-        });
+    // Remove qualquer table-container com overflow no clone
+    clone.querySelectorAll('.table-container').forEach(tc => {
+        tc.style.overflow = 'visible';
+        tc.style.width = '100%';
     });
 
-    waitForPaint().then(() => {
-        // Mede as dimensões REAIS do container
-        const rect = container.getBoundingClientRect();
-        const fullWidth  = Math.max(container.scrollWidth,  container.offsetWidth,  900);
-        const fullHeight = Math.max(container.scrollHeight, container.offsetHeight);
+    // Garante que as tabelas não cortem nada
+    clone.querySelectorAll('table').forEach(tb => {
+        tb.style.width = '100%';
+        tb.style.tableLayout = 'auto';
+        tb.style.borderCollapse = 'collapse';
+    });
+
+    document.body.appendChild(clone);
+
+    // ---------- Restaura os botões/inputs no relatório original ----------
+    hidden.forEach(({ el: node, display }) => { node.style.display = display; });
+
+    // ---------- Espera pintura real ----------
+    const afterPaint = (cb) => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    setTimeout(cb, 350);
+                });
+            });
+        });
+    };
+
+    afterPaint(() => {
+        // Mede dimensões REAIS do clone
+        const fullWidth  = clone.scrollWidth;
+        const fullHeight = clone.scrollHeight;
 
         const opt = {
             margin: [8, 8, 8, 8],
@@ -1192,8 +1174,8 @@ const App = (() => {
                 height: fullHeight,
                 windowWidth: fullWidth,
                 windowHeight: fullHeight,
-                x: 0,                    // ✅ captura a partir do x=0 do elemento
-                y: 0,                    // ✅ captura a partir do y=0 do elemento
+                x: 0,
+                y: 0,
                 scrollX: 0,
                 scrollY: 0,
                 allowTaint: true,
@@ -1203,14 +1185,16 @@ const App = (() => {
             pagebreak: { mode: ['css', 'legacy'] }
         };
 
-        html2pdf().set(opt).from(container).save()
+        html2pdf().set(opt).from(clone).save()
             .then(() => {
-                container.remove();
+                clone.remove();
+                overlay.remove();
                 showToast('✅ PDF gerado com sucesso!', 'success');
             })
             .catch(err => {
                 console.error('exportToPDF:', err);
-                container.remove();
+                clone.remove();
+                overlay.remove();
                 showToast('Erro ao exportar PDF: ' + (err && err.message ? err.message : ''), 'error');
             });
     });
