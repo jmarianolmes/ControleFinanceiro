@@ -1,6 +1,6 @@
 // ============================================================
 // FinFam - Controle Financeiro Familiar
-// Arquivo: js/app.js (VERSÃO COMPLETA - 1500+ linhas)
+// Arquivo: js/app.js (VERSÃO COMPLETA ATUALIZADA)
 // ============================================================
 
 const App = (() => {
@@ -27,7 +27,39 @@ const App = (() => {
     };
 
     let inactivityTimer = null;
+    let isDriveConnected = false;
     const el = id => document.getElementById(id);
+
+    const showLoading = (msg = "Conectando ao Google Drive...") => {
+        let overlay = el("finfamLoadingOverlay");
+        if (!overlay) {
+            overlay = document.createElement("div");
+            overlay.id = "finfamLoadingOverlay";
+            overlay.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(15,23,42,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);";
+            overlay.innerHTML = `
+                <div style="background:#fff;padding:32px 40px;border-radius:16px;text-align:center;max-width:380px;box-shadow:0 20px 40px rgba(0,0,0,0.3);">
+                    <div style="font-size:36px;margin-bottom:12px;animation:spin 1.2s linear infinite;display:inline-block;">🔄</div>
+                    <h3 style="margin:0 0 8px 0;font-size:18px;color:#1e3a5f;font-weight:700;">Conectando ao Banco de Dados</h3>
+                    <p style="margin:0 0 16px 0;font-size:13px;color:#64748b;">${msg}</p>
+                    <div style="width:100%;background:#e2e8f0;height:6px;border-radius:3px;overflow:hidden;position:relative;">
+                        <div style="width:50%;height:100%;background:#1e3a5f;border-radius:3px;animation:progress 1.5s ease-in-out infinite;"></div>
+                    </div>
+                </div>
+                <style>
+                    @keyframes spin { 100% { transform: rotate(360deg); } }
+                    @keyframes progress { 0% { margin-left: -50%; width: 50%; } 50% { margin-left: 25%; width: 60%; } 100% { margin-left: 100%; width: 50%; } }
+                </style>
+            `;
+            document.body.appendChild(overlay);
+        } else {
+            overlay.style.display = "flex";
+        }
+    };
+
+    const hideLoading = () => {
+        const overlay = el("finfamLoadingOverlay");
+        if (overlay) overlay.style.display = "none";
+    };
 
     // ==================== UTILITÁRIOS ====================
     const fmtDate = d => {
@@ -74,30 +106,23 @@ const App = (() => {
         setTimeout(() => { t.classList.remove('show'); }, 3500);
     };
 
-    const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
-    const now = () => new Date().toISOString();
-
-    const resetInactivityTimer = () => {
-        if (inactivityTimer) clearTimeout(inactivityTimer);
-        if (isLoggedIn()) {
-            inactivityTimer = setTimeout(() => {
-                showToast('🕐 Sessão encerrada por inatividade.', 'error');
-                logout();
-            }, INACTIVITY_TIMEOUT);
-        }
+    const generateId = () => {
+        return 'tx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
     };
 
-    // ==================== CATEGORIAS ====================
+    const now = () => new Date().toISOString();
+
+    // ==================== CATEGORIAS PADRÃO ====================
     const defaultCategories = [
-        { id: 'cat_salario_es', name: 'Salário / Emprego', type: 'income', country: 'ES', icon: '💼' },
-        { id: 'cat_freelance_es', name: 'Trabalho Freelance / Extras', type: 'income', country: 'ES', icon: '💻' },
-        { id: 'cat_outras_entradas_es', name: 'Outras Receitas', type: 'income', country: 'ES', icon: '💶' },
-        { id: 'cat_rendimentos', name: 'Rendimentos & Dividendos', type: 'income', country: 'ES', icon: '💰' },
-        { id: 'cat_aluguel_br', name: 'Receita Aluguel', type: 'income', country: 'BR', icon: '🏠' },
-        { id: 'cat_invest_es', name: 'Investimentos & Ações (ES)', type: 'investment', country: 'ES', icon: '📈' },
-        { id: 'cat_invest_br', name: 'Investimentos & Tesouro (BR)', type: 'investment', country: 'BR', icon: '🇧🇷' },
-        { id: 'cat_aluguel_es', name: 'Aluguel de Moradia', type: 'expense', country: 'ES', icon: '🔑' },
-        { id: 'cat_hipoteca_es', name: 'Hipoteca / Financiamento', type: 'expense', country: 'ES', icon: '🏛️' },
+        { id: 'cat_salario_es', name: 'Salário (Espanha)', type: 'income', country: 'ES', icon: '💼' },
+        { id: 'cat_salario_br', name: 'Salário / Renda (Brasil)', type: 'income', country: 'BR', icon: '💵' },
+        { id: 'cat_rendimentos', name: 'Rendimentos / Investimentos', type: 'income', country: 'ES', icon: '📈' },
+        { id: 'cat_outros_ganhos', name: 'Outras Receitas', type: 'income', country: 'ES', icon: '✨' },
+        { id: 'cat_renda_fixa', name: 'Renda Fixa / Tesouro', type: 'investment', country: 'BR', icon: '🏦' },
+        { id: 'cat_acoes', name: 'Ações / Fundos', type: 'investment', country: 'BR', icon: '📊' },
+        { id: 'cat_cripto', name: 'Criptoativos', type: 'investment', country: 'ES', icon: '🪙' },
+        { id: 'cat_reserva', name: 'Reserva de Emergência', type: 'investment', country: 'ES', icon: '🛡️' },
+        { id: 'cat_aluguel', name: 'Aluguel / Hipoteca', type: 'expense', country: 'ES', icon: '🏠' },
         { id: 'cat_mercado', name: 'Mercado / Alimentação', type: 'expense', country: 'ES', icon: '🛒' },
         { id: 'cat_agua', name: 'Água', type: 'expense', country: 'ES', icon: '💧' },
         { id: 'cat_luz', name: 'Energia / Luz', type: 'expense', country: 'ES', icon: '⚡' },
@@ -141,11 +166,12 @@ const App = (() => {
     };
 
     // ============================================================
-    // syncFromDrive - VERSÃO COMPLETA
+    // syncFromDrive - COM SUPORTE A RECARGA SEM PERDA LOCAL
     // ============================================================
     const syncFromDrive = async (silent = false) => {
         const url = state.settings.googleScriptUrl;
         if (!url) {
+            isDriveConnected = true;
             if (!silent) showToast('⚠️ URL do Google Drive não configurada.', 'error');
             return;
         }
@@ -224,12 +250,20 @@ const App = (() => {
                     return true;
                 });
                 
-                state.transactions = unique;
+                const driveIds = new Set(unique.map(t => t.id));
+                const localPending = (state.transactions || []).filter(t => !driveIds.has(t.id));
+                
+                state.transactions = [...unique, ...localPending];
+                isDriveConnected = true;
                 saveState();
                 refreshAllViews();
                 
                 const monthPicker = el('dashMonthPicker');
                 if (monthPicker) monthPicker.value = state.selectedMonth;
+                
+                if (localPending.length > 0) {
+                    syncToDrive();
+                }
                 
                 if (!silent) {
                     showToast(`✅ ${unique.length} registros sincronizados do Drive!`);
@@ -243,6 +277,8 @@ const App = (() => {
         } catch (e) {
             if (!silent) showToast('❌ Erro ao consultar o Banco de Dados.', 'error');
             console.error('❌ Sync error:', e);
+        } finally {
+            hideLoading();
         }
     };
 
@@ -281,6 +317,7 @@ const App = (() => {
             if (data.status === 'success') {
                 dot.style.backgroundColor = '#10b981';
                 text.textContent = '✅ Conectado com Sucesso';
+                isDriveConnected = true;
                 showToast('✅ Conexão com Google Drive estabelecida!', 'success');
             } else {
                 dot.style.backgroundColor = '#ef4444';
@@ -318,6 +355,21 @@ const App = (() => {
         } else {
             resetState();
         }
+
+        const sess = localStorage.getItem(SESSION_KEY);
+        if (sess) {
+            try {
+                const s = JSON.parse(sess);
+                if (s.expiry && new Date(s.expiry) > new Date()) {
+                    state.currentUser = state.users.find(u => u.id === s.userId) || null;
+                    state.sessionExpiry = s.expiry;
+                } else {
+                    clearSession();
+                }
+            } catch (e) {
+                clearSession();
+            }
+        }
     };
 
     const resetState = () => {
@@ -344,179 +396,113 @@ const App = (() => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     };
 
-    const refreshAllViews = () => {
-        const activePage = document.querySelector('.page.active')?.id || 'dashboard';
-        
-        if (activePage === 'dashboard' || !activePage) {
-            const dash = el('dashboard');
-            if (dash) dash.innerHTML = renderDashboard();
-        }
-        if (activePage === 'transactions') {
-            const txTable = el('transactionsTable');
-            if (txTable) txTable.innerHTML = renderTransactionsTable();
-        }
-        if (activePage === 'reports') {
-            const reportContainer = el('reportContainer');
-            if (reportContainer) {
-                reportContainer.innerHTML = renderMonthlyReport();
-            }
-        }
-        
-        const monthPicker = el('dashMonthPicker');
-        if (monthPicker) monthPicker.value = state.selectedMonth;
-    };
-
-    // ==================== AUTENTICAÇÃO ====================
-    const getSession = () => {
-        const raw = sessionStorage.getItem(SESSION_KEY);
-        if (!raw) return null;
-        try {
-            const s = JSON.parse(raw);
-            if (new Date(s.expires) < new Date()) {
-                sessionStorage.removeItem(SESSION_KEY);
-                return null;
-            }
-            return s;
-        } catch (e) {
-            return null;
-        }
-    };
-
-    const setSession = (userId, hours = 12) => {
-        const expires = new Date(Date.now() + hours * 3600000).toISOString();
-        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ userId, expires }));
-        state.currentUser = state.users.find(u => u.id === userId);
-        state.sessionExpiry = expires;
+    const setSession = (userId) => {
+        const expiry = new Date(Date.now() + INACTIVITY_TIMEOUT).toISOString();
+        state.currentUser = state.users.find(u => u.id === userId) || null;
+        state.sessionExpiry = expiry;
+        localStorage.setItem(SESSION_KEY, JSON.stringify({ userId, expiry }));
         resetInactivityTimer();
     };
 
     const clearSession = () => {
-        sessionStorage.removeItem(SESSION_KEY);
         state.currentUser = null;
         state.sessionExpiry = null;
+        isDriveConnected = false;
+        localStorage.removeItem(SESSION_KEY);
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+    };
+
+    const resetInactivityTimer = () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+            if (isLoggedIn()) {
+                clearSession();
+                init();
+                showToast('⏱️ Sessão expirada por inatividade.', 'error');
+            }
+        }, INACTIVITY_TIMEOUT);
     };
 
     const isSetup = () => state.users.length > 0;
-    
-    const isLoggedIn = () => {
-        const s = getSession();
-        if (!s) return false;
-        state.currentUser = state.users.find(u => u.id === s.userId);
-        return true;
-    };
+    const isLoggedIn = () => !!state.currentUser && !!state.sessionExpiry && new Date(state.sessionExpiry) > new Date();
 
-    const togglePrivacy = () => {
-        state.privacyMode = !state.privacyMode;
-        refreshAllViews();
-    };
-
-    // ==================== FILTROS ====================
-    const getSelectedMonthData = () => {
-        const ym = state.selectedMonth;
-        
-        const txs = state.transactions.filter(t => {
-            if (!t || !t.date) return false;
-            try {
-                const d = new Date(t.date);
-                if (!isNaN(d.getTime())) {
-                    return d.toISOString().slice(0, 7) === ym;
-                }
-            } catch (e) {}
-            return false;
-        }).sort((a, b) => new Date(b.date) - new Date(a.date));
-
-        const income = txs.filter(t => t.type === 'income').reduce((s, t) => s + (Number(t.amount) || 0), 0);
-        const expense = txs.filter(t => t.type === 'expense').reduce((s, t) => s + (Number(t.amount) || 0), 0);
-        const investment = txs.filter(t => t.type === 'investment').reduce((s, t) => s + (Number(t.amount) || 0), 0);
-        
-        const balance = income - expense - investment;
-        const savingsRate = income > 0 ? (((income - expense) / income) * 100) : 0;
-
-        const totalInvestments = state.transactions
-            .filter(t => t.type === 'investment')
-            .reduce((s, t) => s + (Number(t.amount) || 0), 0);
-        
-        const totalBalance = state.transactions
-            .filter(t => t.type === 'income')
-            .reduce((s, t) => s + (Number(t.amount) || 0), 0) -
-            state.transactions.filter(t => t.type === 'expense')
-            .reduce((s, t) => s + (Number(t.amount) || 0), 0);
-
-        const netWorth = totalBalance + totalInvestments;
-
-        return {
-            income, expense, investment, balance, savingsRate,
-            netWorth,
-            txs
-        };
-    };
-
-    const changeSelectedMonth = (ym) => {
-        if (!ym) return;
-        state.selectedMonth = ym;
+    const changeSelectedMonth = (m) => {
+        if (!m) return;
+        state.selectedMonth = m;
         saveState();
         refreshAllViews();
     };
 
-    // ==================== LIMPEZA DE DADOS FANTASMAS ====================
+    const refreshAllViews = () => {
+        const dash = el('dashboard');
+        const txs = el('transactions');
+        const rep = el('reports');
+        if (dash && dash.classList.contains('active')) dash.innerHTML = renderDashboard();
+        if (txs && txs.classList.contains('active')) txs.innerHTML = renderTransactions();
+        if (rep && rep.classList.contains('active')) rep.innerHTML = renderMonthlyReport();
+        initCharts();
+    };
+
+    const saveSettings = () => {
+        const url = el('setScriptUrl')?.value.trim();
+        const token = el('setToken')?.value.trim();
+        const day = parseInt(el('setStartDay')?.value) || 1;
+        const curBR = el('setCurBR')?.value.trim() || 'R$';
+        const curES = el('setCurES')?.value.trim() || '€';
+
+        state.settings.googleScriptUrl = url;
+        state.settings.apiToken = token || DEFAULT_TOKEN;
+        state.settings.monthStartDay = day;
+        state.settings.currencyBR = curBR;
+        state.settings.currencyES = curES;
+
+        saveState();
+        showToast('⚙️ Configurações salvas!');
+        checkConnection();
+    };
+
+    const resetAllData = () => {
+        if (confirm('⚠️ ATENÇÃO: Isso apagará TODOS os dados locais deste navegador! Deseja continuar?')) {
+            localStorage.clear();
+            location.reload();
+        }
+    };
+
     const cleanGhostData = () => {
-        console.log('🧹 Iniciando limpeza de dados fantasmas...');
-        console.log('📊 Transações antes:', state.transactions.length);
-        
-        const before = state.transactions.length;
-        
-        // Remove transações com valor 100 e sem descrição (ou descrição vazia)
-        state.transactions = state.transactions.filter(t => {
-            if (t.amount === 100 && !t.description) {
-                console.log('🗑️ Removendo fantasma:', t);
-                return false;
-            }
-            if (t.amount === 100 && t.description === '-') {
-                console.log('🗑️ Removendo fantasma:', t);
-                return false;
-            }
-            return true;
-        });
-        
-        // Remove duplicatas por ID
-        const seenIds = new Set();
-        state.transactions = state.transactions.filter(t => {
-            if (seenIds.has(t.id)) {
-                console.log('🗑️ Removendo duplicata:', t.id);
-                return false;
-            }
-            seenIds.add(t.id);
-            return true;
-        });
-        
-        // Remove transações com data inválida
-        state.transactions = state.transactions.filter(t => {
-            if (!t.date || t.date === 'Invalid Date' || t.date === '') {
-                console.log('🗑️ Removendo data inválida:', t);
-                return false;
-            }
-            return true;
-        });
-        
-        const after = state.transactions.length;
-        console.log(`🧹 Limpeza concluída: ${before} → ${after} registros (${before - after} removidos)`);
-        
+        if (!confirm('⚠️ Limpar dados fantasmas locais?')) return;
+        state.transactions = [];
         saveState();
         refreshAllViews();
-        showToast(`🧹 ${before - after} registros fantasmas removidos!`);
+        showToast('🧹 Dados locais limpos.');
     };
 
-    // ==================== RESETAR DADOS DO DRIVE ====================
     const resetDriveData = async () => {
-        if (!confirm('⚠️ Isso vai APAGAR TODOS os dados do Google Drive e substituir pelos dados locais atuais. Continuar?')) {
+        if (!confirm('🚨 ATENÇÃO: Isso apagará TODOS os lançamentos do Google Drive!')) return;
+        const url = state.settings.googleScriptUrl;
+        if (!url) {
+            showToast('⚠️ URL do Google Drive não configurada.', 'error');
             return;
         }
-        
         try {
             showToast('🔄 Resetando dados do Drive...', 'info');
-            await cleanGhostData();
-            await syncToDrive();
-            showToast('✅ Dados do Drive resetados com sucesso!', 'success');
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                    action: 'sync',
+                    token: state.settings.apiToken || DEFAULT_TOKEN,
+                    transactions: []
+                })
+            });
+            const data = await res.json();
+            if (data.status === 'success') {
+                state.transactions = [];
+                saveState();
+                refreshAllViews();
+                showToast('✅ Dados do Drive resetados!');
+            } else {
+                showToast('❌ Falha ao resetar no Drive.', 'error');
+            }
         } catch (e) {
             showToast('❌ Erro ao resetar dados do Drive.', 'error');
             console.error(e);
@@ -620,56 +606,64 @@ const App = (() => {
         el('newUserEmail').value = '';
         el('newUserPwd').value = '';
         
+        showToast(`✅ Usuário ${name} adicionado com sucesso!`);
+        
         const settingsPage = el('settings');
         if (settingsPage) settingsPage.innerHTML = renderSettings();
-        
-        showToast(`✅ Usuário ${name} adicionado com sucesso!`);
     };
 
-    // DELETAR USUÁRIO
-    const deleteUser = (id) => {
-        const user = state.users.find(u => u.id === id);
+    // REMOVER USUÁRIO
+    const deleteUser = (userId) => {
+        if (userId === state.currentUser?.id) {
+            showToast('⚠️ Você não pode remover seu próprio usuário!', 'error');
+            return;
+        }
+        
+        const user = state.users.find(u => u.id === userId);
         if (!user) return;
         
-        if (confirm(`⚠️ Tem certeza que deseja remover o usuário "${user.name}"?`)) {
-            state.users = state.users.filter(u => u.id !== id);
-            saveState();
-            
-            const settingsPage = el('settings');
-            if (settingsPage) settingsPage.innerHTML = renderSettings();
-            
-            showToast(`🗑️ Usuário ${user.name} removido.`);
+        if (!confirm(`⚠️ Deseja realmente remover o usuário "${user.name}"?`)) {
+            return;
         }
+        
+        state.users = state.users.filter(u => u.id !== userId);
+        saveState();
+        showToast(`🗑️ Usuário ${user.name} removido.`);
+        
+        const settingsPage = el('settings');
+        if (settingsPage) settingsPage.innerHTML = renderSettings();
     };
 
-    // ==================== TELAS DE AUTENTICAÇÃO ====================
+    // ==================== AUTH & SETUP ====================
     const doSetup = async () => {
         const name = el('setupName')?.value.trim();
         const email = el('setupEmail')?.value.trim().toLowerCase();
         const pwd = el('setupPwd')?.value;
-        const pwd2 = el('setupPwd2')?.value;
-        if (!name || !email || !pwd) { 
-            showToast('⚠️ Preencha todos os campos.', 'error'); 
-            return; 
-        }
-        if (pwd !== pwd2) { 
-            showToast('⚠️ As senhas não coincidem.', 'error'); 
-            return; 
+        const curBR = el('setupCurBR')?.value.trim() || 'R$';
+        const curES = el('setupCurES')?.value.trim() || '€';
+
+        if (!name || !email || !pwd) {
+            showToast('⚠️ Preencha todos os campos.', 'error');
+            return;
         }
         if (pwd.length < 6) {
             showToast('⚠️ A senha deve ter no mínimo 6 caracteres.', 'error');
             return;
         }
+
         const passwordHash = await hashPwd(pwd);
-        const user = { 
-            id: generateId(), 
-            name, 
-            email, 
-            passwordHash, 
-            role: 'admin', 
+        const user = {
+            id: generateId(),
+            name,
+            email,
+            passwordHash,
+            role: 'admin',
             createdAt: now()
         };
+
         state.users = [user];
+        state.settings.currencyBR = curBR;
+        state.settings.currencyES = curES;
         saveState();
         setSession(user.id);
         renderApp();
@@ -695,6 +689,7 @@ const App = (() => {
         }
         setSession(user.id);
         renderApp();
+        showLoading("Conectando ao Google Drive...");
         syncFromDrive(true);
         showToast('✅ Sessão iniciada!');
     };
@@ -722,603 +717,424 @@ const App = (() => {
         const reportContainer = el('reportContainer');
         if (reportContainer) {
             reportContainer.innerHTML = renderMonthlyReport();
-            // Atualiza o seletor para o mês atual
             const monthPicker = el('reportMonthPicker');
             if (monthPicker) monthPicker.value = state.selectedMonth;
         }
     }
 };
 
+    const togglePrivacy = () => {
+        state.privacyMode = !state.privacyMode;
+        refreshAllViews();
+    };
     // ==================== RENDERIZAÇÃO ====================
     const renderLogin = () => {
         el('app').innerHTML = `
-            <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
-                <div style="background:#fff;border-radius:20px;padding:40px;width:90%;max-width:400px;box-shadow:0 25px 80px rgba(0,0,0,.3)">
-                    <div style="text-align:center;margin-bottom:24px">
-                        <div style="font-size:40px;margin-bottom:8px">💶</div>
-                        <h1 style="color:var(--navy);margin:0;font-size:24px">FinFam Login</h1>
-                        <p style="color:var(--text-light);font-size:13px;margin:4px 0 0">Controle Financeiro Familiar</p>
-                    </div>
+            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--bg);">
+                <div class="card" style="max-width: 420px; width: 100%; padding: 40px; text-align: center;">
+                    <div style="font-size: 48px; margin-bottom: 12px;">💶</div>
+                    <h2 style="color: var(--navy); margin-bottom: 8px;">FinFam</h2>
+                    <p style="color: var(--text-light); margin-bottom: 24px; font-size: 14px;">Controle Financeiro Familiar (ES 🇪🇸 & BR 🇧🇷)</p>
                     <form onsubmit="event.preventDefault(); App.doLogin();">
-                        <div style="margin-bottom:16px">
+                        <div class="form-group" style="text-align: left;">
                             <label class="form-label">Email</label>
-                            <input type="email" id="loginEmail" placeholder="seu@email.com" class="input-field" required>
+                            <input type="email" id="loginEmail" class="input-field" placeholder="seu@email.com" required>
                         </div>
-                        <div style="margin-bottom:24px">
+                        <div class="form-group" style="text-align: left;">
                             <label class="form-label">Senha</label>
-                            <input type="password" id="loginPwd" placeholder="••••••••" class="input-field" required>
+                            <input type="password" id="loginPwd" class="input-field" placeholder="••••••••" required>
                         </div>
-                        <button type="submit" class="btn-primary" style="width:100%;padding:12px">Entrar no Sistema</button>
+                        <button type="submit" class="btn-primary" style="width: 100%; margin-top: 10px; padding: 12px;">Entrar</button>
                     </form>
                 </div>
-            </div>`;
+            </div>
+            <div id="toast" class="toast"></div>
+        `;
     };
 
     const renderSetup = () => {
         el('app').innerHTML = `
-            <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1e3a5f 0%,#2c5282 50%,#059669 100%)">
-                <div style="background:#fff;border-radius:20px;padding:40px;width:90%;max-width:420px;box-shadow:0 25px 80px rgba(0,0,0,.3)">
-                    <div style="text-align:center;margin-bottom:24px">
-                        <div style="font-size:40px;margin-bottom:8px">🚀</div>
-                        <h1 style="color:var(--navy);margin:0;font-size:24px">Configuração Inicial</h1>
-                        <p style="color:var(--text-light);font-size:13px;margin:4px 0 0">Crie sua conta administrativa principal</p>
+            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--bg);">
+                <div class="card" style="max-width: 480px; width: 100%; padding: 40px;">
+                    <div style="text-align: center; margin-bottom: 24px;">
+                        <div style="font-size: 48px; margin-bottom: 12px;">👋</div>
+                        <h2 style="color: var(--navy); margin-bottom: 8px;">Bem-vindo ao FinFam!</h2>
+                        <p style="color: var(--text-light); font-size: 14px;">Configure o seu usuário administrador para começar.</p>
                     </div>
                     <form onsubmit="event.preventDefault(); App.doSetup();">
-                        <div style="margin-bottom:14px">
-                            <label class="form-label">Nome Completo</label>
-                            <input type="text" id="setupName" placeholder="Seu Nome" class="input-field" required>
+                        <div class="form-group">
+                            <label class="form-label">Seu Nome</label>
+                            <input type="text" id="setupName" class="input-field" placeholder="Ex: João Silva" required>
                         </div>
-                        <div style="margin-bottom:14px">
+                        <div class="form-group">
                             <label class="form-label">Email</label>
-                            <input type="email" id="setupEmail" placeholder="seu@email.com" class="input-field" required>
+                            <input type="email" id="setupEmail" class="input-field" placeholder="seu@email.com" required>
                         </div>
-                        <div style="margin-bottom:14px">
-                            <label class="form-label">Senha</label>
-                            <input type="password" id="setupPwd" placeholder="Mínimo 6 caracteres" class="input-field" required>
+                        <div class="form-group">
+                            <label class="form-label">Senha (mínimo 6 caracteres)</label>
+                            <input type="password" id="setupPwd" class="input-field" placeholder="••••••••" minlength="6" required>
                         </div>
-                        <div style="margin-bottom:24px">
-                            <label class="form-label">Confirmar Senha</label>
-                            <input type="password" id="setupPwd2" placeholder="Repita a senha" class="input-field" required>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                            <div class="form-group">
+                                <label class="form-label">Moeda BR</label>
+                                <input type="text" id="setupCurBR" class="input-field" value="R$">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Moeda ES</label>
+                                <input type="text" id="setupCurES" class="input-field" value="€">
+                            </div>
                         </div>
-                        <button type="submit" class="btn-primary" style="width:100%;padding:12px">Criar Conta e Iniciar</button>
+                        <button type="submit" class="btn-primary" style="width: 100%; margin-top: 10px; padding: 12px;">Criar Conta e Iniciar</button>
                     </form>
                 </div>
-            </div>`;
+            </div>
+            <div id="toast" class="toast"></div>
+        `;
     };
 
-    // ==================== RENDER DASHBOARD ====================
     const renderDashboard = () => {
-        const m = getSelectedMonthData();
+        const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
+        const txs = state.transactions.filter(t => t.date && t.date.startsWith(selMonth));
 
-        const expByCategory = {};
-        m.txs.filter(t => t.type === 'expense').forEach(t => {
-            const catName = state.categories.find(c => c.id === t.categoryId)?.name || 'Outros';
-            expByCategory[catName] = (expByCategory[catName] || 0) + (Number(t.amount) || 0);
-        });
-        const sortedCats = Object.entries(expByCategory).sort((a, b) => b[1] - a[1]);
+        const incES = txs.filter(t => t.country === 'ES' && t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+        const expES = txs.filter(t => t.country === 'ES' && t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
+        const invES = txs.filter(t => t.country === 'ES' && t.type === 'investment').reduce((acc, t) => acc + t.amount, 0);
+        const balES = incES - expES - invES;
+
+        const incBR = txs.filter(t => t.country === 'BR' && t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+        const expBR = txs.filter(t => t.country === 'BR' && t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
+        const invBR = txs.filter(t => t.country === 'BR' && t.type === 'investment').reduce((acc, t) => acc + t.amount, 0);
+        const balBR = incBR - expBR - invBR;
 
         return `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
-            <div>
-                <h2 style="margin:0;font-size:22px;color:var(--navy)">Visão Geral do Mês</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Acompanhamento consolidado da família</p>
-            </div>
-            <div style="display:flex;gap:10px;align-items:center">
-                <input type="month" id="dashMonthPicker" class="input-field" style="padding:8px 12px;font-weight:600" value="${state.selectedMonth}" onchange="App.changeSelectedMonth(this.value)">
-                <button class="btn-primary" onclick="App.showTransactionModal(null)">+ Novo Lançamento</button>
-            </div>
-        </div>
-
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
-            <div class="card stat-card"><div class="stat-label">Saldo Livre</div><div class="stat-value ${m.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.balance, state.settings.currencyES)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Receitas</div><div class="stat-value emerald-text">${fmtMoney(m.income, state.settings.currencyES)}</div></div>
-            <div class="card stat-card"><div class="stat-label">Despesas</div><div class="stat-value danger-text">${fmtMoney(m.expense, state.settings.currencyES)}</div></div>
-            <div class="card stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-label">Investimentos / Aportes</div><div class="stat-value" style="color:#8b5cf6">${fmtMoney(m.investment, state.settings.currencyES)}</div></div>
-            <div class="card stat-card net-worth-card" style="grid-column: span 1;">
-                <div class="stat-label">🏦 Patrimônio Total</div>
-                <div class="net-worth-value">${fmtMoney(m.netWorth, state.settings.currencyES)}</div>
-                <div style="font-size:11px; color: var(--text-light); margin-top:4px;">
-                    Investimentos Acumulados: ${fmtMoney(state.transactions.filter(t => t.type === 'investment').reduce((s, t) => s + (Number(t.amount) || 0), 0), state.settings.currencyES)}
-                </div>
-            </div>
-        </div>
-
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-bottom:24px">
-            <div class="card" style="padding:24px">
-                <h3 style="margin:0 0 20px;font-size:16px;color:var(--navy);display:flex;align-items:center;gap:8px">📊 Distribuição de Gastos por Categoria</h3>
-                ${sortedCats.length === 0 ? '<p style="color:var(--text-light);font-size:14px">Sem despesas registradas no período.</p>' : 
-                    sortedCats.slice(0, 5).map(([cat, val]) => {
-                        const pct = m.expense > 0 ? ((val / m.expense) * 100).toFixed(1) : 0;
-                        return `<div style="margin-bottom:16px">
-                            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;font-weight:600;color:var(--navy)">
-                                <span>${cat}</span>
-                                <span>${fmtMoney(val, state.settings.currencyES)} (${pct}%)</span>
-                            </div>
-                            <div style="width:100%;background:#f1f5f9;height:8px;border-radius:4px;overflow:hidden">
-                                <div style="width:${pct}%;background:#ef4444;height:100%;border-radius:4px"></div>
-                            </div>
-                        </div>`;
-                    }).join('')
-                }
-            </div>
-
-            <div class="card" style="padding:24px">
-                <h3 style="margin:0 0 20px;font-size:16px;color:var(--navy);display:flex;align-items:center;gap:8px">🎯 Eficiência Financeira</h3>
-                
-                <div style="margin-bottom:20px">
-                    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;font-weight:600;color:var(--navy)">
-                        <span>Taxa de Gastos (${m.income > 0 ? ((m.expense / m.income) * 100).toFixed(1) : 0}%)</span>
-                    </div>
-                    <div style="width:100%;background:#f1f5f9;height:12px;border-radius:6px;overflow:hidden">
-                        <div style="width:${Math.min(100, m.income > 0 ? (m.expense / m.income) * 100 : 0)}%;background:#ef4444;height:100%"></div>
-                    </div>
-                </div>
-
-                <div style="margin-bottom:20px">
-                    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;font-weight:600;color:var(--navy)">
-                        <span>Taxa de Aportes (${m.income > 0 ? ((m.investment / m.income) * 100).toFixed(1) : 0}%)</span>
-                    </div>
-                    <div style="width:100%;background:#f1f5f9;height:12px;border-radius:6px;overflow:hidden">
-                        <div style="width:${Math.min(100, m.income > 0 ? (m.investment / m.income) * 100 : 0)}%;background:#8b5cf6;height:100%"></div>
-                    </div>
-                </div>
-
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
                 <div>
-                    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;font-weight:600;color:var(--navy)">
-                        <span>Poupança Líquida (${Math.max(0, m.savingsRate).toFixed(1)}%)</span>
+                    <h2 style="color: var(--navy); margin: 0 0 4px 0;">Painel Financeiro</h2>
+                    <p style="color: var(--text-light); margin: 0; font-size: 14px;">Resumo consolidado das finanças em Espanha e Brasil</p>
+                </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <input type="month" id="dashMonthPicker" class="input-field" value="${selMonth}" onchange="App.changeSelectedMonth(this.value)" style="width: auto;">
+                    <button class="btn-primary" onclick="App.showTransactionModal(null)">+ Novo Lançamento</button>
+                </div>
+            </div>
+
+            <!-- ESPANHA -->
+            <h3 style="color: var(--navy); margin-bottom: 12px; font-size: 16px;">🇪🇸 Espanha (${state.settings.currencyES})</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
+                <div class="card stat-card">
+                    <div class="stat-label">Receitas</div>
+                    <div class="stat-value emerald-text">${fmtMoney(incES, state.settings.currencyES)}</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-label">Despesas</div>
+                    <div class="stat-value danger-text">${fmtMoney(expES, state.settings.currencyES)}</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-label">Investimentos</div>
+                    <div class="stat-value" style="color: var(--purple);">${fmtMoney(invES, state.settings.currencyES)}</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-label">Saldo</div>
+                    <div class="stat-value ${balES >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(balES, state.settings.currencyES)}</div>
+                </div>
+            </div>
+
+            <!-- BRASIL -->
+            <h3 style="color: var(--navy); margin-bottom: 12px; font-size: 16px;">🇧🇷 Brasil (${state.settings.currencyBR})</h3>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 32px;">
+                <div class="card stat-card">
+                    <div class="stat-label">Receitas</div>
+                    <div class="stat-value emerald-text">${fmtMoney(incBR, state.settings.currencyBR)}</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-label">Despesas</div>
+                    <div class="stat-value danger-text">${fmtMoney(expBR, state.settings.currencyBR)}</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-label">Investimentos</div>
+                    <div class="stat-value" style="color: var(--purple);">${fmtMoney(invBR, state.settings.currencyBR)}</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-label">Saldo</div>
+                    <div class="stat-value ${balBR >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(balBR, state.settings.currencyBR)}</div>
+                </div>
+            </div>
+
+            <!-- GRÁFICOS -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-bottom: 32px;">
+                <div class="card" style="padding: 20px;">
+                    <h4 style="margin: 0 0 16px 0; color: var(--navy);">Despesas por Categoria (Espanha)</h4>
+                    <div style="position: relative; height: 260px;">
+                        <canvas id="chartExpensesES"></canvas>
                     </div>
-                    <div style="width:100%;background:#f1f5f9;height:12px;border-radius:6px;overflow:hidden">
-                        <div style="width:${Math.max(0, Math.min(100, m.savingsRate))}%;background:#10b981;height:100%"></div>
+                </div>
+                <div class="card" style="padding: 20px;">
+                    <h4 style="margin: 0 0 16px 0; color: var(--navy);">Comparativo Mensal</h4>
+                    <div style="position: relative; height: 260px;">
+                        <canvas id="chartComparison"></canvas>
                     </div>
                 </div>
             </div>
-        </div>
-
-        <div class="card" style="padding:20px">
-            <h3 style="margin:0 0 16px;font-size:16px;color:var(--navy)">📅 Extrato do Mês Selecionado</h3>
-            ${m.txs.length === 0 ? `<div class="empty-state"><p>Nenhum lançamento encontrado para este mês.</p></div>` : `
-            <div class="table-container">
-                <table class="data-table">
-                    <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
-                    <tbody>${m.txs.map(t => renderTransactionRow(t)).join('')}</tbody>
-                </table>
-            </div>`}
-        </div>`;
-    };
-
-    // ==================== RENDER TRANSAÇÕES ====================
-    const renderTransactionRow = (t) => {
-        const cat = state.categories.find(c => c.id === t.categoryId) || { name: 'Geral', icon: '📋' };
-        const isBR = t.country === 'BR';
-        
-        let typeColor = 'var(--danger)';
-        let typeLabel = 'Despesa';
-        if (t.type === 'income') { typeColor = 'var(--emerald)'; typeLabel = 'Receita'; } 
-        else if (t.type === 'investment') { typeColor = '#8b5cf6'; typeLabel = 'Investimento'; }
-
-        return `<tr>
-            <td style="white-space:nowrap">${fmtDate(t.date)}</td>
-            <td><span class="badge" style="background:${typeColor}22;color:${typeColor};font-weight:700">${typeLabel}</span></td>
-            <td><span class="category-tag">${cat.icon} ${cat.name}</span></td>
-            <td>${t.description || '-'}</td>
-            <td><span class="badge badge-info">👤 ${t.assignedTo || 'Casal'}</span></td>
-            <td><span class="badge ${isBR ? 'badge-info' : 'badge-warning'}">${isBR ? '🇧🇷 Brasil' : '🇪🇸 Espanha'}</span></td>
-            <td style="font-weight:600;color:${typeColor}">${fmtMoney(t.amount, isBR ? state.settings.currencyBR : state.settings.currencyES)}</td>
-            <td style="text-align:right;white-space:nowrap">
-                <button onclick="App.showTransactionModal('${t.id}')" style="background:#e0f2fe;color:#0369a1;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600;margin-right:6px">✏️</button>
-                <button onclick="App.deleteTransaction('${t.id}')" style="background:#fee2e2;color:#b91c1c;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600">🗑️</button>
-            </td>
-        </tr>`;
+        `;
     };
 
     const renderTransactions = () => {
+        const txs = [...state.transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+
         return `
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
-            <div>
-                <h2 style="margin:0;font-size:22px;color:var(--navy)">Histórico Completo de Lançamentos</h2>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Visualização geral de todas as movimentações</p>
-            </div>
-        </div>
-        <div class="card" style="padding:20px">
-            <div id="transactionsTable">${renderTransactionsTable()}</div>
-        </div>`;
-    };
-
-    const renderTransactionsTable = () => {
-        const txs = state.transactions.slice().sort((a, b) => new Date(b.date) - new Date(a.date));
-        if (txs.length === 0) return `<div class="empty-state"><p>Nenhum lançamento cadastrado no banco de dados.</p></div>`;
-        return `
-        <div class="table-container">
-            <table class="data-table">
-                <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th>Valor</th><th style="text-align:right">Ações</th></tr></thead>
-                <tbody>${txs.map(t => renderTransactionRow(t)).join('')}</tbody>
-            </table>
-        </div>`;
-    };
-
-   // ==================== RELATÓRIOS MENSAIS ====================
-const renderMonthlyReport = () => {
-    const ym = state.selectedMonth;
-    const [year, month] = ym.split('-');
-    const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleString('pt-BR', { month: 'long' });
-    
-    // Gera opções de meses para o select (últimos 12 meses)
-    const monthOptions = [];
-    for (let i = 0; i < 12; i++) {
-        const d = new Date(parseInt(year), parseInt(month) - 1 - i, 1);
-        const y = d.getFullYear();
-        const m = String(d.getMonth() + 1).padStart(2, '0');
-        const label = d.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
-        monthOptions.push({ value: `${y}-${m}`, label: label });
-    }
-    
-    // Dados do mês selecionado
-    const monthTxs = state.transactions.filter(t => {
-        if (!t || !t.date) return false;
-        try {
-            const d = new Date(t.date);
-            return !isNaN(d.getTime()) && d.toISOString().slice(0, 7) === ym;
-        } catch (e) { return false; }
-    });
-    
-    const monthIncome = monthTxs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
-    const monthExpense = monthTxs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
-    const monthInvestment = monthTxs.filter(t => t.type === 'investment').reduce((s, t) => s + Number(t.amount), 0);
-    const monthBalance = monthIncome - monthExpense - monthInvestment;
-    
-    // Dados acumulados do ano
-    const yearTxs = state.transactions.filter(t => {
-        if (!t || !t.date) return false;
-        try {
-            const d = new Date(t.date);
-            return !isNaN(d.getTime()) && d.getFullYear() === parseInt(year);
-        } catch (e) { return false; }
-    });
-    
-    const yearIncome = yearTxs.filter(t => t.type === 'income').reduce((s, t) => s + Number(t.amount), 0);
-    const yearExpense = yearTxs.filter(t => t.type === 'expense').reduce((s, t) => s + Number(t.amount), 0);
-    const yearInvestment = yearTxs.filter(t => t.type === 'investment').reduce((s, t) => s + Number(t.amount), 0);
-    const yearBalance = yearIncome - yearExpense - yearInvestment;
-
-    const totalInvestments = state.transactions
-        .filter(t => t.type === 'investment')
-        .reduce((s, t) => s + Number(t.amount), 0);
-    const totalBalance = state.transactions
-        .filter(t => t.type === 'income')
-        .reduce((s, t) => s + Number(t.amount), 0) -
-        state.transactions.filter(t => t.type === 'expense')
-        .reduce((s, t) => s + Number(t.amount), 0);
-    const netWorth = totalBalance + totalInvestments;
-
-    // Constrói o HTML do select de meses
-    const monthSelectOptions = monthOptions.map(m => 
-        `<option value="${m.value}" ${m.value === ym ? 'selected' : ''}>${m.label}</option>`
-    ).join('');
-
-    return `
-    <div class="card no-print" style="padding:20px;margin-bottom:24px">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px">
-            <div>
-                <h3 style="margin:0;color:var(--navy)">📊 Relatório Mensal</h3>
-                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">${monthTxs.length} lançamentos no período</p>
-            </div>
-            <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
-                <!-- SELETOR DE MÊS -->
-                <select id="reportMonthPicker" class="input-field" style="padding:8px 12px;font-weight:600;width:auto;min-width:150px;" onchange="App.changeReportMonth(this.value)">
-                    ${monthSelectOptions}
-                </select>
-                <!-- BOTÕES DE EXPORTAÇÃO -->
-                <button class="btn-primary" style="background:#dc2626" onclick="App.exportToPDF()">📄 PDF</button>
-                <button class="btn-primary" style="background:#10b981" onclick="App.exportToCSV()">📊 CSV</button>
-            </div>
-        </div>
-    </div>
-
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px;margin-bottom:24px">
-        <div class="card" style="padding:20px">
-            <h4 style="margin:0 0 16px;color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px">📆 Mês: ${monthName} ${year}</h4>
-            <div style="display:grid;gap:10px">
-                <div><span class="badge badge-success">Receitas:</span> <strong>${fmtMoney(monthIncome, state.settings.currencyES)}</strong></div>
-                <div><span class="badge badge-danger">Despesas:</span> <strong>${fmtMoney(monthExpense, state.settings.currencyES)}</strong></div>
-                <div><span class="badge badge-purple">Investimentos:</span> <strong>${fmtMoney(monthInvestment, state.settings.currencyES)}</strong></div>
-                <div style="border-top:2px solid var(--border);padding-top:10px;font-size:18px;font-weight:bold;color:${monthBalance >= 0 ? 'var(--emerald)' : 'var(--danger)'}">
-                    Saldo: ${fmtMoney(monthBalance, state.settings.currencyES)}
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+                <div>
+                    <h2 style="color: var(--navy); margin: 0 0 4px 0;">Lançamentos</h2>
+                    <p style="color: var(--text-light); margin: 0; font-size: 14px;">Histórico completo de transações registradas</p>
+                </div>
+                <div style="display: flex; gap: 12px;">
+                    <button class="btn-primary" onclick="App.showTransactionModal(null)">+ Novo Lançamento</button>
                 </div>
             </div>
-        </div>
 
-        <div class="card" style="padding:20px">
-            <h4 style="margin:0 0 16px;color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px">📈 Acumulado ${year}</h4>
-            <div style="display:grid;gap:10px">
-                <div><span class="badge badge-success">Receitas:</span> <strong>${fmtMoney(yearIncome, state.settings.currencyES)}</strong></div>
-                <div><span class="badge badge-danger">Despesas:</span> <strong>${fmtMoney(yearExpense, state.settings.currencyES)}</strong></div>
-                <div><span class="badge badge-purple">Investimentos:</span> <strong>${fmtMoney(yearInvestment, state.settings.currencyES)}</strong></div>
-                <div style="border-top:2px solid var(--border);padding-top:10px;font-size:18px;font-weight:bold;color:${yearBalance >= 0 ? 'var(--emerald)' : 'var(--danger)'}">
-                    Saldo: ${fmtMoney(yearBalance, state.settings.currencyES)}
+            <div class="card" style="padding: 20px;">
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>Descrição</th>
+                                <th>Categoria</th>
+                                <th>Responsável</th>
+                                <th>País</th>
+                                <th>Tipo</th>
+                                <th style="text-align: right;">Valor</th>
+                                <th style="text-align: center;">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${txs.length === 0 ? `
+                                <tr><td colspan="8" style="text-align: center; color: var(--text-light); padding: 40px;">Nenhum lançamento encontrado.</td></tr>
+                            ` : txs.map(t => {
+                                const cat = state.categories.find(c => c.id === t.categoryId);
+                                const isExpense = t.type === 'expense';
+                                const isIncome = t.type === 'income';
+                                const cur = t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES;
+                                return `
+                                    <tr>
+                                        <td>${fmtDate(t.date)}</td>
+                                        <td><strong>${t.description || '-'}</strong></td>
+                                        <td><span class="category-tag">${cat ? cat.icon + ' ' + cat.name : '-'}</span></td>
+                                        <td><span class="badge badge-info">${t.assignedTo || 'Casal'}</span></td>
+                                        <td>${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</td>
+                                        <td>
+                                            <span class="badge ${isIncome ? 'badge-success' : isExpense ? 'badge-danger' : 'badge-purple'}">
+                                                ${isIncome ? 'Receita' : isExpense ? 'Despesa' : 'Investimento'}
+                                            </span>
+                                        </td>
+                                        <td style="text-align: right; font-weight: 600;" class="${isIncome ? 'emerald-text' : isExpense ? 'danger-text' : ''}">
+                                            ${isExpense ? '-' : isIncome ? '+' : ''}${fmtMoney(t.amount, cur)}
+                                        </td>
+                                        <td style="text-align: center;">
+                                            <button onclick="App.showTransactionModal('${t.id}')" style="background:#e0f2fe;color:#0369a1;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;margin-right:6px;">✏️</button>
+                                            <button onclick="App.deleteTransaction('${t.id}')" style="background:#fee2e2;color:#b91c1c;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">🗑️</button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
                 </div>
             </div>
-        </div>
-
-        <div class="card" style="padding:20px;background:linear-gradient(135deg,#fffbeb 0%,#fff 100%);border-left:4px solid #f59e0b">
-            <h4 style="margin:0 0 16px;color:#92400e;border-bottom:2px solid #fde68a;padding-bottom:8px">🏦 Patrimônio Total</h4>
-            <div style="display:grid;gap:10px">
-                <div style="font-size:28px;font-weight:800;color:#d97706">
-                    ${fmtMoney(netWorth, state.settings.currencyES)}
-                </div>
-                <div style="font-size:13px;color:var(--text-light)">
-                    Investimentos acumulados: ${fmtMoney(totalInvestments, state.settings.currencyES)}
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- LISTA DE LANÇAMENTOS DO MÊS -->
-    <div class="card" style="padding:20px">
-        <h4 style="margin:0 0 16px;color:var(--navy)">📋 Lançamentos do Mês</h4>
-        ${monthTxs.length === 0 ? '<div class="empty-state"><p>Nenhum lançamento neste mês.</p></div>' : `
-        <div class="table-container">
-            <table class="data-table">
-                <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Valor</th></tr></thead>
-                <tbody>${monthTxs.map(t => {
-                    const cat = state.categories.find(c => c.id === t.categoryId) || {name:'Geral'};
-                    return `<tr>
-                        <td>${fmtDate(t.date)}</td>
-                        <td><span class="badge ${t.type === 'income' ? 'badge-success' : t.type === 'investment' ? 'badge-purple' : 'badge-danger'}">${t.type === 'income' ? 'Receita' : t.type === 'investment' ? 'Investimento' : 'Despesa'}</span></td>
-                        <td>${cat.icon} ${cat.name}</td>
-                        <td>${t.description || '-'}</td>
-                        <td style="font-weight:600">${fmtMoney(t.amount, state.settings.currencyES)}</td>
-                    </tr>`;
-                }).join('')}</tbody>
-            </table>
-        </div>`}
-    </div>`;
-};
-
-    // ==================== MUDAR MÊS DO RELATÓRIO ====================
-const changeReportMonth = (ym) => {
-    if (!ym) return;
-    state.selectedMonth = ym;
-    saveState();
-    const reportContainer = el('reportContainer');
-    if (reportContainer) {
-        reportContainer.innerHTML = renderMonthlyReport();
-    }
-    // Atualiza também o seletor do Dashboard
-    const monthPicker = el('dashMonthPicker');
-    if (monthPicker) monthPicker.value = ym;
-};
-
-// ==================== EXPORTAÇÃO CSV ====================
-const exportToCSV = () => {
-    const ym = state.selectedMonth;
-    const txs = state.transactions.filter(t => {
-        if (!t || !t.date) return false;
-        try {
-            const d = new Date(t.date);
-            return !isNaN(d.getTime()) && d.toISOString().slice(0, 7) === ym;
-        } catch (e) { return false; }
-    });
-    
-    if (!txs.length) { 
-        showToast('⚠️ Nenhum dado para exportar neste mês.', 'error'); 
-        return; 
-    }
-    
-    // Cabeçalhos do CSV
-    let csv = 'Data;Tipo;Categoria;Descrição;Responsável;País;Valor\n';
-    
-    // Dados
-    txs.forEach(t => {
-        const cat = state.categories.find(c => c.id === t.categoryId)?.name || 'Geral';
-        const tipo = t.type === 'income' ? 'Receita' : t.type === 'investment' ? 'Investimento' : 'Despesa';
-        const valor = Number(t.amount).toFixed(2).replace('.', ',');
-        csv += `${fmtDate(t.date)};${tipo};${cat};${t.description || ''};${t.assignedTo || 'Casal'};${t.country || 'ES'};${valor}\n`;
-    });
-    
-    // Cria o arquivo
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `Relatorio_FinFam_${ym}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
-    
-    showToast(`✅ CSV exportado com sucesso! (${txs.length} registros)`);
-};
-    
-// ==================== EXPORTAÇÃO PDF ====================
-const exportToPDF = () => {
-    // Busca a página de relatórios
-    const reportsPage = document.getElementById('reports');
-    if (!reportsPage) {
-        showToast('❌ Página de relatórios não encontrada.', 'error');
-        return;
-    }
-    
-    showToast('🔄 Gerando PDF...', 'info');
-    
-    // ============================================================
-    // CLONA O CONTEÚDO COMPLETO DA PÁGINA
-    // ============================================================
-    const content = reportsPage.cloneNode(true);
-    
-    // ============================================================
-    // REMOVE ELEMENTOS QUE NÃO DEVEM APARECER NO PDF
-    // ============================================================
-    content.querySelectorAll('.no-print, button, select, .btn-primary').forEach(el => el.remove());
-    
-    // Remove o card que contém os botões
-    const firstCard = content.querySelector('.card.no-print');
-    if (firstCard) firstCard.remove();
-    
-    // ============================================================
-    // VERIFICA SE HÁ DADOS NA TABELA
-    // ============================================================
-    const hasData = content.querySelector('table tbody tr');
-    const totalRows = content.querySelectorAll('table tbody tr').length || 0;
-    
-    // Se não houver dados, adiciona uma mensagem amigável
-    if (!hasData) {
-        const emptyMessage = document.createElement('div');
-        emptyMessage.style.textAlign = 'center';
-        emptyMessage.style.padding = '40px 20px';
-        emptyMessage.style.color = '#64748b';
-        emptyMessage.style.fontSize = '16px';
-        emptyMessage.innerHTML = `
-            <p style="font-size:18px;margin-bottom:10px;">📭 Nenhum lançamento encontrado</p>
-            <p style="font-size:14px;">Para este mês não há registros financeiros.</p>
-            <p style="font-size:12px;margin-top:10px;color:#94a3b8;">Adicione lançamentos no Dashboard para vê-los aqui.</p>
         `;
-        
-        // Encontra o card que contém a tabela e substitui pelo aviso
-        const tableCard = content.querySelector('.card:last-child');
-        if (tableCard) {
-            tableCard.innerHTML = '';
-            tableCard.appendChild(emptyMessage);
-        }
-    }
-    
-    // ============================================================
-    // CRIA O WRAPPER COM CABEÇALHO
-    // ============================================================
-    const wrapper = document.createElement('div');
-    wrapper.style.padding = '20px';
-    wrapper.style.fontFamily = 'Arial, sans-serif';
-    wrapper.style.background = '#ffffff';
-    wrapper.style.color = '#000000';
-    
-    const ym = state.selectedMonth;
-    const [year, month] = ym.split('-');
-    const monthName = new Date(parseInt(year), parseInt(month) - 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
-    
-    wrapper.innerHTML = `
-        <div style="text-align:center;margin-bottom:30px;padding-bottom:20px;border-bottom:3px solid #1e3a5f;">
-            <h1 style="font-size:24px;margin:0;color:#1e3a5f;">📊 Relatório Financeiro FinFam</h1>
-            <h2 style="font-size:18px;margin:5px 0;color:#2c5282;">${monthName}</h2>
-            <p style="color:#64748b;margin:5px 0 0;">Controle Financeiro Familiar</p>
-            <p style="color:#64748b;font-size:12px;margin-top:5px;">
-                ${totalRows} lançamento${totalRows !== 1 ? 's' : ''} | Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}
-            </p>
-        </div>
-    `;
-    
-    // Adiciona o conteúdo limpo
-    wrapper.appendChild(content);
-    
-    // ============================================================
-    // CONFIGURAÇÃO DO PDF
-    // ============================================================
-    const opt = {
-        margin: [10, 10, 10, 10],
-        filename: `Relatorio_FinFam_${ym}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { 
-            scale: 2, 
-            useCORS: true,
-            logging: false,
-            letterRendering: true,
-            backgroundColor: '#ffffff'
-        },
-        jsPDF: { 
-            unit: 'mm', 
-            format: 'a4', 
-            orientation: 'portrait' 
-        }
     };
-    
-    // ============================================================
-    // GERA O PDF (SEMPRE, MESMO SEM DADOS)
-    // ============================================================
-    html2pdf()
-        .set(opt)
-        .from(wrapper)
-        .save()
-        .then(() => {
-            showToast(`✅ PDF gerado com sucesso! (${totalRows} registros)`);
-        })
-        .catch((err) => {
-            console.error('Erro PDF:', err);
-            showToast('❌ Erro ao gerar PDF. Tente novamente.', 'error');
-        });
-};
-    
-    // ==================== CONFIGURAÇÕES ====================
+
+    const renderMonthlyReport = () => {
+        const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
+        const txs = state.transactions.filter(t => t.date && t.date.startsWith(selMonth));
+
+        const expES = txs.filter(t => t.country === 'ES' && t.type === 'expense');
+        const expBR = txs.filter(t => t.country === 'BR' && t.type === 'expense');
+
+        const totalES = expES.reduce((acc, t) => acc + t.amount, 0);
+        const totalBR = expBR.reduce((acc, t) => acc + t.amount, 0);
+
+        return `
+            <div id="reportContainer">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+                    <div>
+                        <h2 style="color: var(--navy); margin: 0 0 4px 0;">Relatório Mensal</h2>
+                        <p style="color: var(--text-light); margin: 0; font-size: 14px;">Detalhamento das despesas por categoria</p>
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <input type="month" id="reportMonthPicker" class="input-field" value="${selMonth}" onchange="App.changeReportMonth(this.value)" style="width: auto;">
+                        <button class="btn-secondary" onclick="App.exportToPDF()">📄 PDF</button>
+                        <button class="btn-secondary" onclick="App.exportToCSV()">📊 CSV</button>
+                    </div>
+                </div>
+
+                <div class="card" style="padding: 24px; margin-bottom: 24px;">
+                    <h3 style="color: var(--navy); margin-top: 0;">🇪🇸 Despesas em Espanha (${fmtMoney(totalES, state.settings.currencyES)})</h3>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
+                            </thead>
+                            <tbody>
+                                ${expES.length === 0 ? `
+                                    <tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:20px;">Nenhuma despesa no mês.</td></tr>
+                                ` : expES.map(t => {
+                                    const cat = state.categories.find(c => c.id === t.categoryId);
+                                    return `
+                                        <tr>
+                                            <td>${fmtDate(t.date)}</td>
+                                            <td><strong>${t.description}</strong></td>
+                                            <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
+                                            <td>${t.assignedTo || 'Casal'}</td>
+                                            <td style="text-align: right; font-weight: 600;">${fmtMoney(t.amount, state.settings.currencyES)}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card" style="padding: 24px;">
+                    <h3 style="color: var(--navy); margin-top: 0;">🇧🇷 Despesas no Brasil (${fmtMoney(totalBR, state.settings.currencyBR)})</h3>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
+                            </thead>
+                            <tbody>
+                                ${expBR.length === 0 ? `
+                                    <tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:20px;">Nenhuma despesa no mês.</td></tr>
+                                ` : expBR.map(t => {
+                                    const cat = state.categories.find(c => c.id === t.categoryId);
+                                    return `
+                                        <tr>
+                                            <td>${fmtDate(t.date)}</td>
+                                            <td><strong>${t.description}</strong></td>
+                                            <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
+                                            <td>${t.assignedTo || 'Casal'}</td>
+                                            <td style="text-align: right; font-weight: 600;">${fmtMoney(t.amount, state.settings.currencyBR)}</td>
+                                        </tr>
+                                    `;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+    };
+
     const renderSettings = () => {
         return `
-        <div class="card" style="padding:24px;max-width:700px;margin:0 auto">
-            <h3 style="margin:0 0 16px;color:var(--navy)">⚙️ Configurações</h3>
-            
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;padding:12px;background:#f8fafc;border-radius:8px">
-                <span id="connStatusDot" style="width:12px;height:12px;border-radius:50%;background:#f59e0b"></span>
-                <span id="connStatusText" style="font-weight:600">Verificando conexão...</span>
-                <button onclick="App.checkConnection()" style="margin-left:auto;padding:6px 12px;background:#e2e8f0;border:none;border-radius:6px;cursor:pointer;font-weight:600">🔍 Testar</button>
+            <div style="margin-bottom: 24px;">
+                <h2 style="color: var(--navy); margin: 0 0 4px 0;">Configurações</h2>
+                <p style="color: var(--text-light); margin: 0; font-size: 14px;">Integração com Google Drive e preferências do sistema</p>
             </div>
-            
-            <form onsubmit="event.preventDefault(); App.saveSettings();">
-                <div style="margin-bottom:16px">
-                    <label class="form-label">URL do Google Apps Script (Web App)</label>
-                    <input type="url" id="cfgUrl" class="input-field" placeholder="https://script.google.com/macros/s/.../exec" value="${state.settings.googleScriptUrl || ''}" required>
+
+            <div class="card" style="padding: 28px; max-width: 700px;">
+                <h3 style="color: var(--navy); margin-top: 0; margin-bottom: 16px;">🌐 Google Apps Script (Drive / Excel)</h3>
+                <div class="form-group">
+                    <label class="form-label">URL do Web App (Google Apps Script)</label>
+                    <input type="url" id="setScriptUrl" class="input-field" value="${state.settings.googleScriptUrl || ''}" placeholder="https://script.google.com/macros/s/.../exec">
                 </div>
-                <div style="display:flex;gap:12px;flex-wrap:wrap">
-                    <button type="submit" class="btn-primary">💾 Salvar Configurações</button>
-                    <button type="button" class="btn-primary" style="background:#0284c7" onclick="App.syncFromDrive()">📥 Sincronizar do Drive</button>
-                    <button type="button" class="btn-primary" style="background:#059669" onclick="App.syncToDrive()">📤 Enviar para o Drive</button>
-                    <button type="button" class="btn-primary" style="background:#dc2626" onclick="App.syncFromDriveForce()">🔄 Forçar Substituição</button>
+                <div class="form-group">
+                    <label class="form-label">Token de Segurança da API</label>
+                    <input type="text" id="setToken" class="input-field" value="${state.settings.apiToken || DEFAULT_TOKEN}">
                 </div>
-            </form>
-            
-            ${renderUserManagement()}
-            
-            <hr style="margin:30px 0;border:none;border-top:1px solid #e2e8f0">
-            
-            <!-- FERRAMENTAS DE MANUTENÇÃO -->
-            <div style="margin-bottom:30px;">
-                <h4 style="color: var(--warning); margin-top:0;">🧹 Ferramentas de Manutenção</h4>
-                <div style="display:flex;gap:12px;flex-wrap:wrap;">
-                    <button onclick="App.cleanGhostData()" style="background:#fef3c7;color:#92400e;border:1px solid #f59e0b;padding:10px 16px;border-radius:8px;cursor:pointer;font-weight:600;">
-                        🧹 Limpar Dados Fantasmas
-                    </button>
-                    <button onclick="App.resetDriveData()" style="background:#fee2e2;color:#991b1b;border:1px solid #ef4444;padding:10px 16px;border-radius:8px;cursor:pointer;font-weight:600;">
-                        🔄 Resetar Drive com Dados Locais
-                    </button>
+
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; background: #f8fafc; padding: 12px 16px; border-radius: 8px;">
+                    <div id="connStatusDot" style="width: 12px; height: 12px; border-radius: 50%; background: #94a3b8;"></div>
+                    <span id="connStatusText" style="font-size: 13px; font-weight: 500;">Status da Conexão: Não testado</span>
+                    <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px; margin-left: auto;" onclick="App.checkConnection()">Testar Conexão</button>
                 </div>
-                <p style="font-size:12px;color:var(--text-light);margin-top:8px;">
-                    💡 "Limpar Dados Fantasmas" remove registros suspeitos (ex: valor 100 sem descrição).<br>
-                    💡 "Resetar Drive" substitui os dados do Drive pelos locais.
-                </p>
+
+                <h3 style="color: var(--navy); margin-top: 24px; margin-bottom: 16px;">⚙️ Preferências</h3>
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 24px;">
+                    <div class="form-group">
+                        <label class="form-label">Moeda BR</label>
+                        <input type="text" id="setCurBR" class="input-field" value="${state.settings.currencyBR || 'R$'}">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Moeda ES</label>
+                        <input type="text" id="setCurES" class="input-field" value="${state.settings.currencyES || '€'}">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Dia Início Mês</label>
+                        <input type="number" id="setStartDay" class="input-field" value="${state.settings.monthStartDay || 1}" min="1" max="28">
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 12px; margin-bottom: 24px;">
+                    <button class="btn-primary" onclick="App.saveSettings()">Salvar Configurações</button>
+                    <button class="btn-secondary" onclick="App.syncFromDrive(false)">Sincronizar Agora</button>
+                </div>
+
+                ${renderUserManagement()}
+
+                <div style="margin-top: 30px; border-top: 2px solid var(--border); padding-top: 20px;">
+                    <h4 style="color: var(--danger); margin-bottom: 12px;">⚠️ Zona de Perigo</h4>
+                    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+                        <button class="btn-secondary" style="border-color: #cbd5e1;" onclick="App.cleanGhostData()">🧹 Limpar Fantasmas Locais</button>
+                        <button class="btn-secondary" style="border-color: #f59e0b; color: #d97706;" onclick="App.syncFromDriveForce()">📥 Forçar Cópia do Drive</button>
+                        <button class="btn-danger" onclick="App.resetDriveData()">🚨 Resetar Dados do Drive</button>
+                        <button class="btn-danger" style="background: #991b1b;" onclick="App.resetAllData()">💥 Reset Total</button>
+                    </div>
+                </div>
             </div>
-            
-            <hr style="margin:30px 0;border:none;border-top:1px solid #e2e8f0">
-            
-            <div>
-                <h4 style="color:var(--danger);margin-top:0">⚠️ Zona de Perigo</h4>
-                <p style="color:var(--text-light);font-size:13px">
-                    <strong>O que isso faz?</strong> Apaga <strong>TODOS</strong> os dados locais deste navegador (PC/celular). 
-                    Os dados no Google Drive <strong>NÃO</strong> são afetados.
-                </p>
-                <button onclick="App.resetAllData()" style="background:#fee2e2;color:#b91c1c;border:none;padding:10px 16px;border-radius:8px;cursor:pointer;font-weight:600">
-                    🗑️ Redefinir Dados Locais
-                </button>
-            </div>
-        </div>`;
+        `;
     };
 
-    const saveSettings = () => {
-        const url = el('cfgUrl')?.value.trim() || '';
-        state.settings.googleScriptUrl = url;
-        saveState();
-        showToast('✅ Configurações salvas!');
-        checkConnection();
-    };
+    // ==================== GRÁFICOS (CHART.JS) ====================
+    let chartExpInstance = null;
+    let chartCompInstance = null;
 
-    const resetAllData = () => {
-        if (confirm('⚠️ Tem certeza absoluta que deseja apagar tudo? Esta ação é irreversível!')) {
-            localStorage.clear();
-            sessionStorage.clear();
-            location.reload();
-        }
+    const initCharts = () => {
+        const cExp = el('chartExpensesES');
+        const cComp = el('chartComparison');
+        if (!cExp || !cComp) return;
+
+        const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
+        const txs = state.transactions.filter(t => t.date && t.date.startsWith(selMonth));
+
+        const expES = txs.filter(t => t.country === 'ES' && t.type === 'expense');
+        const catMap = {};
+        expES.forEach(t => {
+            const cat = state.categories.find(c => c.id === t.categoryId);
+            const name = cat ? cat.name : 'Outros';
+            catMap[name] = (catMap[name] || 0) + t.amount;
+        });
+
+        if (chartExpInstance) chartExpInstance.destroy();
+        chartExpInstance = new Chart(cExp, {
+            type: 'doughnut',
+            data: {
+                labels: Object.keys(catMap),
+                datasets: [{
+                    data: Object.values(catMap),
+                    backgroundColor: ['#1e3a5f', '#059669', '#d97706', '#dc2626', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#64748b']
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
+        });
+
+        const incES = txs.filter(t => t.country === 'ES' && t.type === 'income').reduce((a, b) => a + b.amount, 0);
+        const totExpES = expES.reduce((a, b) => a + b.amount, 0);
+
+        if (chartCompInstance) chartCompInstance.destroy();
+        chartCompInstance = new Chart(cComp, {
+            type: 'bar',
+            data: {
+                labels: ['Receitas (€)', 'Despesas (€)'],
+                datasets: [{
+                    label: selMonth,
+                    data: [incES, totExpES],
+                    backgroundColor: ['#059669', '#dc2626'],
+                    borderRadius: 6
+                }]
+            },
+            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+        });
     };
 
     // ==================== MODAL DE LANÇAMENTOS ====================
@@ -1335,6 +1151,16 @@ const exportToPDF = () => {
 
         const categoriesOptions = state.categories.map(c => 
             `<option value="${c.id}" ${tx && tx.categoryId === c.id ? 'selected' : ''}>${c.icon} ${c.name} (${c.country})</option>`
+        ).join('');
+
+        const assignedCurrent = tx ? tx.assignedTo : 'Casal';
+        const userNames = (state.users || []).map(u => u.name);
+        const optionsList = ['Casal', ...userNames.filter(n => n !== 'Casal')];
+        if (assignedCurrent && !optionsList.includes(assignedCurrent)) {
+            optionsList.push(assignedCurrent);
+        }
+        const usersOptions = optionsList.map(name => 
+            `<option value="${name}" ${assignedCurrent === name ? 'selected' : ''}>${name === 'Casal' ? '💑 Casal' : '👤 ' + name}</option>`
         ).join('');
 
         el('modalContent').innerHTML = `
@@ -1368,7 +1194,9 @@ const exportToPDF = () => {
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                     <div class="form-group">
                         <label class="form-label">Responsável</label>
-                        <input type="text" id="txAssigned" class="input-field" value="${tx ? tx.assignedTo : 'Casal'}">
+                        <select id="txAssigned" class="input-field">
+                            ${usersOptions}
+                        </select>
                     </div>
                     <div class="form-group">
                         <label class="form-label">País</label>
@@ -1397,6 +1225,10 @@ const exportToPDF = () => {
     };
 
     const saveTransaction = (id) => {
+        if (state.settings.googleScriptUrl && !isDriveConnected) {
+            showToast('⚠️ Aguarde a conexão com o Google Drive antes de salvar.', 'error');
+            return;
+        }
         const type = el('txType').value;
         const date = el('txDate').value;
         const categoryId = el('txCategory').value;
@@ -1427,6 +1259,10 @@ const exportToPDF = () => {
     };
 
     const deleteTransaction = (id) => {
+        if (state.settings.googleScriptUrl && !isDriveConnected) {
+            showToast('⚠️ Aguarde a conexão com o Google Drive antes de excluir.', 'error');
+            return;
+        }
         if (confirm('⚠️ Deseja realmente excluir este lançamento?')) {
             state.transactions = state.transactions.filter(t => t.id !== id);
             saveState();
@@ -1434,6 +1270,46 @@ const exportToPDF = () => {
             showToast('🗑️ Lançamento removido.');
             syncToDrive();
         }
+    };
+
+    // ==================== EXPORTAÇÕES ====================
+    const changeReportMonth = (m) => {
+        state.selectedMonth = m;
+        saveState();
+        const rep = el('reportContainer');
+        if (rep) rep.innerHTML = renderMonthlyReport();
+    };
+
+    const exportToPDF = () => {
+        const element = el('reportContainer');
+        if (!element) return;
+        const opt = {
+            margin: 10,
+            filename: `FinFam_Relatorio_${state.selectedMonth}.pdf`,
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+        html2pdf().set(opt).from(element).save();
+    };
+
+    const exportToCSV = () => {
+        const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
+        const txs = state.transactions.filter(t => t.date && t.date.startsWith(selMonth));
+        if (txs.length === 0) {
+            showToast('⚠️ Nenhuma transação para exportar neste mês.', 'error');
+            return;
+        }
+        let csv = 'Data;Tipo;Categoria;Descricao;Responsavel;Pais;Valor\n';
+        txs.forEach(t => {
+            const cat = state.categories.find(c => c.id === t.categoryId);
+            csv += `"${t.date}";"${t.type}";"${cat ? cat.name : ''}";"${t.description}";"${t.assignedTo}";"${t.country}";"${t.amount}"\n`;
+        });
+        const blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `FinFam_${selMonth}.csv`;
+        link.click();
     };
 
     // ==================== RENDER APP ====================
@@ -1483,6 +1359,7 @@ const exportToPDF = () => {
         else if (!isLoggedIn()) renderLogin();
         else {
             renderApp();
+            showLoading("Conectando ao Google Drive...");
             syncFromDrive(true).then(() => {
                 console.log('✅ Sincronização automática concluída');
                 console.log('📊 Total de transações:', state.transactions.length);
