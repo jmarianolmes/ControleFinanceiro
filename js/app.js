@@ -945,61 +945,45 @@ const App = (() => {
  const renderMonthlyReport = () => {
     const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
 
-    // Função auxiliar para extrair 'AAAA-MM' de qualquer formato de data
+    // Converte qualquer data com precisão para 'AAAA-MM'
     const getYearMonth = (dateStr) => {
         if (!dateStr) return '';
         const s = String(dateStr).trim();
-        // Caso AAAA-MM-DD ou AAAA-MM
-        if (/^\d{4}-\d{2}/.test(s)) {
-            return s.slice(0, 7);
-        }
-        // Caso DD/MM/AAAA
-        const brMatch = s.match(/^\d{1,2}\/(\d{1,2})\/(\d{4})/);
-        if (brMatch) {
-            const m = brMatch[1].padStart(2, '0');
-            const y = brMatch[2];
-            return `${y}-${m}`;
-        }
-        // Fallback usando Date
+        if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 7);
+        const brMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (brMatch) return `${brMatch[3]}-${brMatch[2].padStart(2, '0')}`;
         try {
             const d = new Date(s);
-            if (!isNaN(d.getTime())) {
-                const y = d.getFullYear();
-                const m = String(d.getMonth() + 1).padStart(2, '0');
-                return `${y}-${m}`;
-            }
+            if (!isNaN(d.getTime())) return d.toISOString().slice(0, 7);
         } catch (e) {}
         return '';
     };
 
-    // Filtra todas as transações que pertencem ao mês selecionado
+    // Pega todos os registros pertencentes ao mês selecionado
     const txs = (state.transactions || []).filter(t => {
         if (!t || !t.date) return false;
         return getYearMonth(t.date) === selMonth;
-    });
+    }).sort((a, b) => (b.date > a.date ? 1 : -1));
 
-    // Filtra despesas com tolerância a maiúsculas/minúsculas e fallback para ES
-    const expES = txs.filter(t => {
-        const country = String(t.country || 'ES').trim().toUpperCase();
-        const type = String(t.type || '').trim().toLowerCase();
-        return country === 'ES' && (type === 'expense' || type === 'despesa');
-    });
+    // Separação por tipo
+    const incomes = txs.filter(t => (t.type || '').toLowerCase() === 'income');
+    const expenses = txs.filter(t => (t.type || '').toLowerCase() === 'expense');
+    const investments = txs.filter(t => (t.type || '').toLowerCase() === 'investment');
 
-    const expBR = txs.filter(t => {
-        const country = String(t.country || '').trim().toUpperCase();
-        const type = String(t.type || '').trim().toLowerCase();
-        return country === 'BR' && (type === 'expense' || type === 'despesa');
-    });
+    const totalIncome = incomes.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const totalExpense = expenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const totalInvestment = investments.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const saldoMes = totalIncome - totalExpense - totalInvestment;
 
-    const totalES = expES.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const totalBR = expBR.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const [ano, mes] = selMonth.split('-');
+    const nomeMes = new Date(parseInt(ano), parseInt(mes) - 1, 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
 
     return `
         <div id="reportContainer">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
                 <div>
-                    <h2 style="color: var(--navy); margin: 0 0 4px 0;">Relatório Mensal</h2>
-                    <p style="color: var(--text-light); margin: 0; font-size: 14px;">Detalhamento das despesas por categoria (${txs.length} lançamentos no mês)</p>
+                    <h2 style="color: var(--navy); margin: 0 0 4px 0;">Relatório de ${nomeMes}</h2>
+                    <p style="color: var(--text-light); margin: 0; font-size: 14px;">Total de ${txs.length} movimentação(ões) encontrada(s)</p>
                 </div>
                 <div style="display: flex; gap: 12px; align-items: center;">
                     <input type="month" id="reportMonthPicker" class="input-field" value="${selMonth}" onchange="App.changeReportMonth(this.value)" style="width: auto;">
@@ -1007,51 +991,65 @@ const App = (() => {
                     <button class="btn-secondary" onclick="App.exportToCSV()">📊 CSV</button>
                 </div>
             </div>
-            <div class="card" style="padding: 24px; margin-bottom: 24px;">
-                <h3 style="color: var(--navy); margin-top: 0;">🇪🇸 Despesas em Espanha (${fmtMoney(totalES, state.settings?.currencyES || '€')})</h3>
-                <div class="table-container">
-                    <table class="data-table">
-                        <thead>
-                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
-                        </thead>
-                        <tbody>
-                            ${expES.length === 0 ? `
-                                <tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:20px;">Nenhuma despesa no mês.</td></tr>
-                            ` : expES.map(t => {
-                                const cat = (state.categories || []).find(c => c.id === t.categoryId);
-                                return `
-                                    <tr>
-                                        <td>${fmtDate(t.date)}</td>
-                                        <td><strong>${t.description || '-'}</strong></td>
-                                        <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
-                                        <td>${t.assignedTo || 'Casal'}</td>
-                                        <td style="text-align: right; font-weight: 600;">${fmtMoney(t.amount, state.settings?.currencyES || '€')}</td>
-                                    </tr>
-                                `;
-                            }).join('')}
-                        </tbody>
-                    </table>
+
+            <!-- CARDS DE TOTAIS DO MÊS -->
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
+                <div class="card stat-card">
+                    <div class="stat-label">Receitas</div>
+                    <div class="stat-value emerald-text">+${fmtMoney(totalIncome, state.settings?.currencyES || '€')}</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-label">Despesas</div>
+                    <div class="stat-value danger-text">-${fmtMoney(totalExpense, state.settings?.currencyES || '€')}</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-label">Investimentos</div>
+                    <div class="stat-value" style="color: #8b5cf6;">${fmtMoney(totalInvestment, state.settings?.currencyES || '€')}</div>
+                </div>
+                <div class="card stat-card">
+                    <div class="stat-label">Saldo do Mês</div>
+                    <div class="stat-value ${saldoMes >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(saldoMes, state.settings?.currencyES || '€')}</div>
                 </div>
             </div>
+
+            <!-- TABELA COM TODAS AS TRANSAÇÕES DO MÊS -->
             <div class="card" style="padding: 24px;">
-                <h3 style="color: var(--navy); margin-top: 0;">🇧🇷 Despesas no Brasil (${fmtMoney(totalBR, state.settings?.currencyBR || 'R$')})</h3>
+                <h3 style="color: var(--navy); margin-top: 0; margin-bottom: 16px;">📋 Todas as Transações do Período</h3>
                 <div class="table-container">
                     <table class="data-table">
                         <thead>
-                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
+                            <tr>
+                                <th>Data</th>
+                                <th>Tipo</th>
+                                <th>Descrição</th>
+                                <th>Categoria</th>
+                                <th>Responsável</th>
+                                <th>País</th>
+                                <th style="text-align: right;">Valor</th>
+                            </tr>
                         </thead>
                         <tbody>
-                            ${expBR.length === 0 ? `
-                                <tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:20px;">Nenhuma despesa no mês.</td></tr>
-                            ` : expBR.map(t => {
+                            ${txs.length === 0 ? `
+                                <tr><td colspan="7" style="text-align:center;color:var(--text-light);padding:24px;">Nenhum lançamento encontrado para ${selMonth}.</td></tr>
+                            ` : txs.map(t => {
                                 const cat = (state.categories || []).find(c => c.id === t.categoryId);
+                                const isInc = (t.type || '').toLowerCase() === 'income';
+                                const isInv = (t.type || '').toLowerCase() === 'investment';
+                                const badgeClass = isInc ? 'badge-success' : isInv ? 'badge-purple' : 'badge-danger';
+                                const typeLabel = isInc ? 'Receita' : isInv ? 'Investimento' : 'Despesa';
+                                const sign = isInc ? '+' : isInv ? '' : '-';
+
                                 return `
                                     <tr>
                                         <td>${fmtDate(t.date)}</td>
+                                        <td><span class="badge ${badgeClass}">${typeLabel}</span></td>
                                         <td><strong>${t.description || '-'}</strong></td>
                                         <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
                                         <td>${t.assignedTo || 'Casal'}</td>
-                                        <td style="text-align: right; font-weight: 600;">${fmtMoney(t.amount, state.settings?.currencyBR || 'R$')}</td>
+                                        <td>${t.country || 'ES'}</td>
+                                        <td style="text-align: right; font-weight: 600;" class="${isInc ? 'emerald-text' : isInv ? '' : 'danger-text'}">
+                                            ${sign}${fmtMoney(t.amount, state.settings?.currencyES || '€')}
+                                        </td>
                                     </tr>
                                 `;
                             }).join('')}
@@ -1311,12 +1309,18 @@ const App = (() => {
     };
 
     // ==================== EXPORTAÇÕES ====================
-    const changeReportMonth = (m) => {
-        state.selectedMonth = m;
-        saveState();
-        const rep = el('reportContainer');
-        if (rep) rep.innerHTML = renderMonthlyReport();
-    };
+   const changeReportMonth = (ym) => {
+    if (!ym) return;
+    state.selectedMonth = ym;
+    saveState();
+    const reportContainer = el('reportContainer');
+    if (reportContainer) {
+        reportContainer.innerHTML = renderMonthlyReport();
+    }
+    const dashPicker = el('dashMonthPicker');
+    if (dashPicker) dashPicker.value = ym;
+};
+
 
     const exportToPDF = () => {
         const element = el('reportContainer');
