@@ -1,23 +1,24 @@
-// ============================================================
-// FinFam - Controle Financeiro Familiar
-// Arquivo: js/app.js (VERSÃO COMPLETA ATUALIZADA)
-// ============================================================
+/**
+ * FinFam - Controle Financeiro Familiar
+ * Versão Consolidada: Categorias Unificadas, Investimento Fixo e Multi-moeda (ES/BR)
+ */
 
 const App = (() => {
-    const STORAGE_KEY = 'finfam_data_v2';
-    const SESSION_KEY = 'finfam_session';
-    const DEFAULT_TOKEN = 'FinFam_SecureToken_2026_@Key';
-    const INACTIVITY_TIMEOUT = 15 * 60 * 1000;
+    const STORAGE_KEY = 'finfam_app_state_v1';
+    const SESSION_KEY = 'finfam_session_v1';
+    const DEFAULT_TOKEN = 'finfam_secret_token_2026';
+
+    let isDriveConnected = false;
 
     let state = {
         users: [],
         transactions: [],
         categories: [],
-        settings: { 
-            currencyBR: 'R$', 
-            currencyES: '€', 
-            monthStartDay: 1, 
-            googleScriptUrl: '', 
+        settings: {
+            currencyBR: 'R$',
+            currencyES: '€',
+            monthStartDay: 1,
+            googleScriptUrl: '',
             apiToken: DEFAULT_TOKEN
         },
         currentUser: null,
@@ -27,311 +28,218 @@ const App = (() => {
     };
 
     let inactivityTimer = null;
-    let isDriveConnected = false;
     const el = id => document.getElementById(id);
 
-    const showLoading = (msg = "Conectando ao Google Drive...") => {
-        let overlay = el("finfamLoadingOverlay");
-        if (!overlay) {
-            overlay = document.createElement("div");
-            overlay.id = "finfamLoadingOverlay";
-            overlay.style.cssText = "position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(15,23,42,0.85);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);";
-            overlay.innerHTML = `
-                <div style="background:#fff;padding:32px 40px;border-radius:16px;text-align:center;max-width:380px;box-shadow:0 20px 40px rgba(0,0,0,0.3);">
-                    <div style="font-size:36px;margin-bottom:12px;animation:spin 1.2s linear infinite;display:inline-block;">🔄</div>
-                    <h3 style="margin:0 0 8px 0;font-size:18px;color:#1e3a5f;font-weight:700;">Conectando ao Banco de Dados</h3>
-                    <p style="margin:0 0 16px 0;font-size:13px;color:#64748b;">${msg}</p>
-                    <div style="width:100%;background:#e2e8f0;height:6px;border-radius:3px;overflow:hidden;position:relative;">
-                        <div style="width:50%;height:100%;background:#1e3a5f;border-radius:3px;animation:progress 1.5s ease-in-out infinite;"></div>
-                    </div>
-                </div>
-                <style>
-                    @keyframes spin { 100% { transform: rotate(360deg); } }
-                    @keyframes progress { 0% { margin-left: -50%; width: 50%; } 50% { margin-left: 25%; width: 60%; } 100% { margin-left: 100%; width: 50%; } }
-                </style>
-            `;
-            document.body.appendChild(overlay);
-        } else {
-            overlay.style.display = "flex";
-        }
-    };
-
-    const hideLoading = () => {
-        const overlay = el("finfamLoadingOverlay");
-        if (overlay) overlay.style.display = "none";
-    };
-
     // ==================== UTILITÁRIOS ====================
+    const getYearMonth = (dateStr) => {
+        if (!dateStr) return '';
+        const s = String(dateStr).trim();
+        if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 7);
+        const brMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (brMatch) return `${brMatch[3]}-${brMatch[2].padStart(2, '0')}`;
+        try {
+            const d = new Date(s);
+            if (!isNaN(d.getTime())) return d.toISOString().slice(0, 7);
+        } catch (e) {}
+        return '';
+    };
+
     const fmtDate = d => {
         if (!d) return '-';
+        const s = String(d).trim();
+        const brMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (brMatch) return `${brMatch[1].padStart(2, '0')}/${brMatch[2].padStart(2, '0')}/${brMatch[3]}`;
+        const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (isoMatch) return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
         try {
-            const dt = new Date(d);
-            if (!isNaN(dt.getTime())) {
-                return dt.toLocaleDateString('pt-BR');
-            }
+            const dt = new Date(s);
+            if (!isNaN(dt.getTime())) return dt.toLocaleDateString('pt-BR');
         } catch (e) {}
-        const parts = String(d).split('-');
-        if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
-        return String(d);
+        return s;
     };
 
-    const fmtMoney = (v, currency) => {
-        if (state.privacyMode) return '***';
-        const n = Number(v);
-        const safe = Number.isFinite(n) ? n : 0;
-        return `${currency || '€'} ${safe.toFixed(2).replace('.', ',')}`;
+    const fmtMoney = (val, currency = '€') => {
+        if (state.privacyMode) return '••••••';
+        const n = Number(val) || 0;
+        return `${currency} ${n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     };
 
-    const hashPwd = async (value) => {
-        try {
-            if (window.crypto?.subtle) {
-                const data = new TextEncoder().encode(value);
-                const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-                return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-            }
-        } catch (e) {}
-        let hash = 2166136261;
-        for (let i = 0; i < value.length; i++) { 
-            hash ^= value.charCodeAt(i); 
-            hash = Math.imul(hash, 16777619); 
-        }
-        return (hash >>> 0).toString(16);
-    };
+    const generateId = () => 'tx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
 
     const showToast = (msg, type = 'success') => {
         const t = el('toast');
         if (!t) return;
-        t.textContent = String(msg);
+        t.textContent = msg;
         t.className = `toast ${type} show`;
-        setTimeout(() => { t.classList.remove('show'); }, 3500);
+        setTimeout(() => { t.className = 'toast'; }, 3500);
     };
 
-    const generateId = () => {
-        return 'tx_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-    };
-
-    const now = () => new Date().toISOString();
-
-    // ==================== CATEGORIAS PADRÃO ====================
+    // ==================== CATEGORIAS PADRÃO UNIFICADAS ====================
     const defaultCategories = [
-        { id: 'cat_salario_es', name: 'Salário (Espanha)', type: 'income', country: 'ES', icon: '💼' },
-        { id: 'cat_salario_br', name: 'Salário / Renda (Brasil)', type: 'income', country: 'BR', icon: '💵' },
-        { id: 'cat_rendimentos', name: 'Rendimentos / Investimentos', type: 'income', country: 'ES', icon: '📈' },
-        { id: 'cat_outros_ganhos', name: 'Outras Receitas', type: 'income', country: 'ES', icon: '✨' },
-        { id: 'cat_renda_fixa', name: 'Renda Fixa / Tesouro', type: 'investment', country: 'BR', icon: '🏦' },
-        { id: 'cat_acoes', name: 'Ações / Fundos', type: 'investment', country: 'BR', icon: '📊' },
-        { id: 'cat_cripto', name: 'Criptoativos', type: 'investment', country: 'ES', icon: '🪙' },
-        { id: 'cat_reserva', name: 'Reserva de Emergência', type: 'investment', country: 'ES', icon: '🛡️' },
-        { id: 'cat_aluguel', name: 'Aluguel / Hipoteca', type: 'expense', country: 'ES', icon: '🏠' },
-        { id: 'cat_mercado', name: 'Mercado / Alimentação', type: 'expense', country: 'ES', icon: '🛒' },
-        { id: 'cat_agua', name: 'Água', type: 'expense', country: 'ES', icon: '💧' },
-        { id: 'cat_luz', name: 'Energia / Luz', type: 'expense', country: 'ES', icon: '⚡' },
-        { id: 'cat_gas', name: 'Gás', type: 'expense', country: 'ES', icon: '🔥' },
-        { id: 'cat_escola', name: 'Escola / Crianças', type: 'expense', country: 'ES', icon: '🎒' },
-        { id: 'cat_veiculo', name: 'Veículo / Transporte', type: 'expense', country: 'ES', icon: '🚗' },
-        { id: 'cat_lazer', name: 'Lazer & Família', type: 'expense', country: 'ES', icon: '🎬' },
-        { id: 'cat_outros_es', name: 'Outras Despesas', type: 'expense', country: 'ES', icon: '📋' },
-        { id: 'cat_cc_br', name: 'Cartão de Crédito', type: 'expense', country: 'BR', icon: '💳' },
-        { id: 'cat_outros_br', name: 'Compromissos Diversos', type: 'expense', country: 'BR', icon: '🇧🇷' }
+        // RECEITAS
+        { id: 'cat_salario', aliases: ['cat_salario_es'], name: 'Salário', type: 'income', icon: '💼' },
+        { id: 'cat_freelance', aliases: ['cat_freelance_es'], name: 'Freelance / Extras', type: 'income', icon: '💻' },
+        { id: 'cat_aluguel_rec', aliases: ['cat_aluguel_br'], name: 'Aluguel Recebido', type: 'income', icon: '🏠' },
+        { id: 'cat_rendimentos', aliases: [], name: 'Rendimentos & Dividendos', type: 'income', icon: '💰' },
+        { id: 'cat_outras_receitas', aliases: ['cat_outras_entradas_es'], name: 'Outras Receitas', type: 'income', icon: '💶' },
+
+        // INVESTIMENTOS (Categoria única fixa)
+        { id: 'cat_investimentos', aliases: ['cat_invest_es', 'cat_invest_br'], name: 'Investimentos & Aplicações', type: 'investment', icon: '📈' },
+
+        // DESPESAS
+        { id: 'cat_moradia', aliases: ['cat_aluguel_es'], name: 'Aluguel / Moradia', type: 'expense', icon: '🔑' },
+        { id: 'cat_hipoteca', aliases: ['cat_hipoteca_es'], name: 'Financiamento / Hipoteca', type: 'expense', icon: '🏛️' },
+        { id: 'cat_mercado', aliases: [], name: 'Supermercado / Alimentação', type: 'expense', icon: '🛒' },
+        { id: 'cat_contas', aliases: ['cat_agua', 'cat_luz', 'cat_gas'], name: 'Contas (Água / Luz / Gás)', type: 'expense', icon: '⚡' },
+        { id: 'cat_educacao', aliases: ['cat_escola'], name: 'Educação / Filhos', type: 'expense', icon: '🎒' },
+        { id: 'cat_transporte', aliases: ['cat_veiculo'], name: 'Transporte / Veículo', type: 'expense', icon: '🚗' },
+        { id: 'cat_lazer', aliases: [], name: 'Lazer & Família', type: 'expense', icon: '🎬' },
+        { id: 'cat_cartao', aliases: ['cat_cc_br'], name: 'Cartão de Crédito', type: 'expense', icon: '💳' },
+        { id: 'cat_outras_despesas', aliases: ['cat_outros_es', 'cat_outros_br'], name: 'Outras Despesas', type: 'expense', icon: '📋' }
     ];
 
-    // ==================== GOOGLE DRIVE ====================
-    const syncToDrive = async () => {
-        const url = state.settings.googleScriptUrl;
-        if (!url) {
-            showToast('⚠️ URL do Google Drive não configurada.', 'error');
-            return;
-        }
-        try {
-            showToast('🔄 Enviando dados para o Drive...', 'info');
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ 
-                    action: 'sync', 
-                    token: state.settings.apiToken || DEFAULT_TOKEN, 
-                    transactions: state.transactions 
-                })
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                showToast(`✅ ${state.transactions.length} registros salvos no Google Drive!`);
-            } else {
-                showToast(data.message || '❌ Erro ao salvar no Drive.', 'error');
-            }
-        } catch (e) {
-            showToast('❌ Erro ao comunicar com o Google Drive.', 'error');
-            console.error('Sync error:', e);
+    const getCategoryById = (catId) => {
+        if (!catId) return { name: 'Geral', icon: '📋' };
+        const found = (state.categories || defaultCategories).find(c => 
+            c.id === catId || (c.aliases && c.aliases.includes(catId))
+        );
+        return found || { name: 'Geral', icon: '📋' };
+    };
+
+    // ==================== OVERLAY DE CONEXÃO ====================
+    const showConnectionProgress = (msg = 'Conectando ao banco de dados no Google Drive...') => {
+        let overlay = el('finfam-conn-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'finfam-conn-overlay';
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,0.85);z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;backdrop-filter:blur(4px);';
+            overlay.innerHTML = `
+                <div style="background:#1e293b;padding:32px;border-radius:16px;box-shadow:0 20px 50px rgba(0,0,0,0.5);text-align:center;max-width:420px;width:90%;">
+                    <div style="font-size:36px;margin-bottom:12px;">🔄</div>
+                    <h3 id="finfam-conn-title" style="margin:0 0 8px 0;font-size:18px;color:#fff;">Sincronizando com o Drive</h3>
+                    <p id="finfam-conn-msg" style="margin:0 0 20px 0;font-size:13px;color:#94a3b8;">${msg}</p>
+                    <div style="width:100%;height:6px;background:#334155;border-radius:3px;overflow:hidden;position:relative;">
+                        <div id="finfam-conn-bar" style="width:30%;height:100%;background:#10b981;border-radius:3px;transition:width 0.3s;animation:finfam-pulse 1.5s infinite linear;"></div>
+                    </div>
+                </div>
+                <style>
+                    @keyframes finfam-pulse {
+                        0% { margin-left: 0%; width: 25%; }
+                        50% { margin-left: 50%; width: 45%; }
+                        100% { margin-left: 100%; width: 10%; }
+                    }
+                </style>
+            `;
+            document.body.appendChild(overlay);
+        } else {
+            const m = el('finfam-conn-msg');
+            if (m) m.textContent = msg;
+            overlay.style.display = 'flex';
         }
     };
 
-    // ============================================================
-    // syncFromDrive - COM SUPORTE A RECARGA SEM PERDA LOCAL
-    // ============================================================
+    const hideConnectionProgress = () => {
+        const overlay = el('finfam-conn-overlay');
+        if (overlay) overlay.style.display = 'none';
+    };
+
+    // ==================== SINCRONIZAÇÃO GOOGLE DRIVE ====================
+    const syncToDrive = async () => {
+        const url = state.settings.googleScriptUrl;
+        if (!url) return;
+        try {
+            await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                    action: 'sync',
+                    token: state.settings.apiToken || DEFAULT_TOKEN,
+                    transactions: state.transactions
+                })
+            });
+            console.log('☁️ Backup salvo no Drive.');
+        } catch (e) {
+            console.error('Falha ao gravar no Drive:', e);
+        }
+    };
+
     const syncFromDrive = async (silent = false) => {
         const url = state.settings.googleScriptUrl;
         if (!url) {
             isDriveConnected = true;
-            if (!silent) showToast('⚠️ URL do Google Drive não configurada.', 'error');
+            hideConnectionProgress();
             return;
         }
-        
+
+        if (!silent) showConnectionProgress('Carregando dados da planilha do Google Drive...');
+
         try {
-            if (!silent) showToast('🔄 Sincronizando com o Drive...', 'info');
-            
             const res = await fetch(url, {
                 method: 'POST',
                 headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ 
-                    action: 'fetch', 
-                    token: state.settings.apiToken || DEFAULT_TOKEN 
+                body: JSON.stringify({
+                    action: 'fetch',
+                    token: state.settings.apiToken || DEFAULT_TOKEN
                 })
             });
-            
+
             const data = await res.json();
-            console.log('📥 Dados do Drive:', data);
-            
             if (data.status === 'success' && Array.isArray(data.transactions)) {
-                console.log(`📊 Recebidos ${data.transactions.length} registros do Drive`);
-                
-                // NORMALIZAÇÃO COMPLETA
                 const normalized = data.transactions.map(t => {
-                    let dateStr = t.date || t.Data || '';
-                    let normalizedDate = '';
-                    
-                    if (dateStr) {
-                        dateStr = String(dateStr).trim();
-                        
-                        const jsDateMatch = dateStr.match(/([A-Za-z]{3})\s+([A-Za-z]{3})\s+(\d{2})\s+(\d{4})/);
-                        if (jsDateMatch) {
-                            const monthMap = {
-                                'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
-                                'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
-                                'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
-                            };
-                            const month = monthMap[jsDateMatch[2]] || '01';
-                            const day = jsDateMatch[3].padStart(2, '0');
-                            const year = jsDateMatch[4];
-                            normalizedDate = `${year}-${month}-${day}`;
-                        }
-                        else if (dateStr.match(/^\d{4}-\d{2}-\d{2}/)) {
-                            normalizedDate = dateStr.slice(0, 10);
-                        }
-                        else {
-                            try {
-                                const d = new Date(dateStr);
-                                if (!isNaN(d.getTime())) {
-                                    normalizedDate = d.toISOString().slice(0, 10);
-                                }
-                            } catch (e) {}
+                    let d = t.date || t.Data || '';
+                    let normDate = '';
+                    if (d) {
+                        d = String(d).trim();
+                        if (/^\d{4}-\d{2}-\d{2}/.test(d)) {
+                            normDate = d.slice(0, 10);
+                        } else {
+                            const br = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                            if (br) normDate = `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}`;
+                            else {
+                                try {
+                                    const dt = new Date(d);
+                                    if (!isNaN(dt.getTime())) normDate = dt.toISOString().slice(0, 10);
+                                } catch (e) {}
+                            }
                         }
                     }
-                    
-                    if (!normalizedDate) {
-                        normalizedDate = new Date().toISOString().slice(0, 10);
-                    }
-                    
+                    if (!normDate) normDate = new Date().toISOString().slice(0, 10);
+
                     return {
-                        id: t.id || t.ID || generateId(),
-                        date: normalizedDate,
-                        type: t.type || t.Tipo || 'expense',
-                        categoryId: t.categoryId || t.CategoriaID || 'cat_outros_es',
+                        id: String(t.id || t.ID || generateId()),
+                        date: normDate,
+                        type: String(t.type || t.Tipo || 'expense').toLowerCase(),
+                        categoryId: t.categoryId || t.Categoria || 'cat_outras_despesas',
                         description: t.description || t.Descrição || '',
                         assignedTo: t.assignedTo || t.Responsável || 'Casal',
-                        country: t.country || t.País || 'ES',
-                        amount: Number(t.amount || t.Valor) || 0
+                        country: String(t.country || t.País || 'ES').toUpperCase(),
+                        amount: Number(t.amount || t.Valor || 0)
                     };
                 });
-                
-                const seenIds = new Set();
-                const unique = normalized.filter(t => {
-                    if (seenIds.has(t.id)) return false;
-                    seenIds.add(t.id);
-                    return true;
-                });
-                
-                const driveIds = new Set(unique.map(t => t.id));
-                const localPending = (state.transactions || []).filter(t => !driveIds.has(t.id));
-                
-                state.transactions = [...unique, ...localPending];
-                isDriveConnected = true;
+
+                // Merge seguro mantendo pendências locais
+                const driveIds = new Set(normalized.map(t => t.id));
+                const localPendentes = state.transactions.filter(t => !driveIds.has(t.id));
+                state.transactions = [...normalized, ...localPendentes];
                 saveState();
-                refreshAllViews();
-                
-                const monthPicker = el('dashMonthPicker');
-                if (monthPicker) monthPicker.value = state.selectedMonth;
-                
-                if (localPending.length > 0) {
-                    syncToDrive();
-                }
-                
-                if (!silent) {
-                    showToast(`✅ ${unique.length} registros sincronizados do Drive!`);
-                }
-                
-                console.log(`📊 ${unique.length} registros normalizados`);
-                
-            } else {
-                if (!silent) showToast(data.message || '❌ Erro ao consultar o Banco de Dados.', 'error');
-            }
-        } catch (e) {
-            if (!silent) showToast('❌ Erro ao consultar o Banco de Dados.', 'error');
-            console.error('❌ Sync error:', e);
-        } finally {
-            hideLoading();
-        }
-    };
-
-    // ============================================================
-    // syncFromDriveForce - FORÇA SUBSTITUIÇÃO
-    // ============================================================
-    const syncFromDriveForce = async () => {
-        if (!confirm('⚠️ Isso vai SUBSTITUIR TODOS os dados locais pelos dados do Drive. Continuar?')) {
-            return;
-        }
-        await syncFromDrive(false);
-    };
-
-    const checkConnection = async () => {
-        const dot = el('connStatusDot');
-        const text = el('connStatusText');
-        const url = state.settings.googleScriptUrl;
-        if (!dot || !text) return;
-        if (!url) {
-            dot.style.backgroundColor = '#ef4444';
-            text.textContent = '❌ URL não configurada';
-            return;
-        }
-        text.textContent = '🔄 Verificando...';
-        dot.style.backgroundColor = '#f59e0b';
-        try {
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ 
-                    action: 'ping', 
-                    token: state.settings.apiToken || DEFAULT_TOKEN 
-                })
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                dot.style.backgroundColor = '#10b981';
-                text.textContent = '✅ Conectado com Sucesso';
                 isDriveConnected = true;
-                showToast('✅ Conexão com Google Drive estabelecida!', 'success');
+                hideConnectionProgress();
+                refreshAllViews();
+
+                if (localPendentes.length > 0) syncToDrive();
+                if (!silent) showToast(`✅ ${state.transactions.length} registros atualizados!`);
             } else {
-                dot.style.backgroundColor = '#ef4444';
-                text.textContent = '❌ Erro de Autenticação';
-                showToast('❌ Falha na autenticação.', 'error');
+                throw new Error('Resposta inválida do Apps Script');
             }
         } catch (e) {
-            dot.style.backgroundColor = '#ef4444';
-            text.textContent = '❌ Falha na Conexão';
-            showToast('❌ Não foi possível conectar.', 'error');
+            console.warn('Google Drive offline ou inacessível no momento:', e);
+            isDriveConnected = true;
+            hideConnectionProgress();
+            if (!silent) showToast('⚠️ Sem resposta do Drive. Usando dados locais.', 'error');
         }
     };
 
-    // ==================== GESTÃO DE ESTADO ====================
+    // ==================== ESTADO E SESSÃO ====================
     const initState = () => {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
@@ -340,36 +248,8 @@ const App = (() => {
                 state = parsed;
                 state.categories = [...defaultCategories];
                 if (!state.selectedMonth) state.selectedMonth = new Date().toISOString().slice(0, 7);
-                if (!state.settings) {
-                    state.settings = { 
-                        currencyBR: 'R$', 
-                        currencyES: '€', 
-                        monthStartDay: 1, 
-                        googleScriptUrl: '', 
-                        apiToken: DEFAULT_TOKEN
-                    };
-                }
-            } catch (e) {
-                resetState();
-            }
-        } else {
-            resetState();
-        }
-
-        const sess = localStorage.getItem(SESSION_KEY);
-        if (sess) {
-            try {
-                const s = JSON.parse(sess);
-                if (s.expiry && new Date(s.expiry) > new Date()) {
-                    state.currentUser = state.users.find(u => u.id === s.userId) || null;
-                    state.sessionExpiry = s.expiry;
-                } else {
-                    clearSession();
-                }
-            } catch (e) {
-                clearSession();
-            }
-        }
+            } catch (e) { resetState(); }
+        } else { resetState(); }
     };
 
     const resetState = () => {
@@ -377,13 +257,7 @@ const App = (() => {
             users: [],
             transactions: [],
             categories: [...defaultCategories],
-            settings: { 
-                currencyBR: 'R$', 
-                currencyES: '€', 
-                monthStartDay: 1, 
-                googleScriptUrl: '', 
-                apiToken: DEFAULT_TOKEN
-            },
+            settings: { currencyBR: 'R$', currencyES: '€', monthStartDay: 1, googleScriptUrl: '', apiToken: DEFAULT_TOKEN },
             currentUser: null,
             sessionExpiry: null,
             privacyMode: false,
@@ -396,856 +270,523 @@ const App = (() => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     };
 
-    const setSession = (userId) => {
-        const expiry = new Date(Date.now() + INACTIVITY_TIMEOUT).toISOString();
-        state.currentUser = state.users.find(u => u.id === userId) || null;
-        state.sessionExpiry = expiry;
-        localStorage.setItem(SESSION_KEY, JSON.stringify({ userId, expiry }));
+    const isSetup = () => state.users && state.users.length > 0;
+
+    const isLoggedIn = () => {
+        const sess = getSession();
+        return !!sess && !!state.currentUser;
+    };
+
+    const getSession = () => {
+        const raw = sessionStorage.getItem(SESSION_KEY);
+        if (!raw) return null;
+        try {
+            const s = JSON.parse(raw);
+            if (new Date(s.expires) < new Date()) {
+                sessionStorage.removeItem(SESSION_KEY);
+                return null;
+            }
+            return s;
+        } catch (e) { return null; }
+    };
+
+    const setSession = (userId, hours = 12) => {
+        const expires = new Date(Date.now() + hours * 3600000).toISOString();
+        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ userId, expires }));
+        state.currentUser = state.users.find(u => u.id === userId);
+        state.sessionExpiry = expires;
         resetInactivityTimer();
     };
 
     const clearSession = () => {
+        sessionStorage.removeItem(SESSION_KEY);
         state.currentUser = null;
         state.sessionExpiry = null;
-        isDriveConnected = false;
-        localStorage.removeItem(SESSION_KEY);
         if (inactivityTimer) clearTimeout(inactivityTimer);
     };
 
     const resetInactivityTimer = () => {
         if (inactivityTimer) clearTimeout(inactivityTimer);
         inactivityTimer = setTimeout(() => {
-            if (isLoggedIn()) {
-                clearSession();
-                init();
-                showToast('⏱️ Sessão expirada por inatividade.', 'error');
-            }
-        }, INACTIVITY_TIMEOUT);
+            clearSession();
+            renderLogin();
+            showToast('Sessão expirada por inatividade', 'info');
+        }, 15 * 60 * 1000);
     };
 
-    const isSetup = () => state.users.length > 0;
-    const isLoggedIn = () => !!state.currentUser && !!state.sessionExpiry && new Date(state.sessionExpiry) > new Date();
-
-    const changeSelectedMonth = (m) => {
-        if (!m) return;
-        state.selectedMonth = m;
+    const togglePrivacy = () => {
+        state.privacyMode = !state.privacyMode;
         saveState();
         refreshAllViews();
     };
 
-    const refreshAllViews = () => {
-        const dash = el('dashboard');
-        const txs = el('transactions');
-        const rep = el('reports');
-        if (dash && dash.classList.contains('active')) dash.innerHTML = renderDashboard();
-        if (txs && txs.classList.contains('active')) txs.innerHTML = renderTransactions();
-        if (rep && rep.classList.contains('active')) rep.innerHTML = renderMonthlyReport();
-        initCharts();
-    };
-
-    const saveSettings = () => {
-        const url = el('setScriptUrl')?.value.trim();
-        const token = el('setToken')?.value.trim();
-        const day = parseInt(el('setStartDay')?.value) || 1;
-        const curBR = el('setCurBR')?.value.trim() || 'R$';
-        const curES = el('setCurES')?.value.trim() || '€';
-
-        state.settings.googleScriptUrl = url;
-        state.settings.apiToken = token || DEFAULT_TOKEN;
-        state.settings.monthStartDay = day;
-        state.settings.currencyBR = curBR;
-        state.settings.currencyES = curES;
-
-        saveState();
-        showToast('⚙️ Configurações salvas!');
-        checkConnection();
-    };
-
-    const resetAllData = () => {
-        if (confirm('⚠️ ATENÇÃO: Isso apagará TODOS os dados locais deste navegador! Deseja continuar?')) {
-            localStorage.clear();
-            location.reload();
-        }
-    };
-
-    const cleanGhostData = () => {
-        if (!confirm('⚠️ Limpar dados fantasmas locais?')) return;
-        state.transactions = [];
-        saveState();
-        refreshAllViews();
-        showToast('🧹 Dados locais limpos.');
-    };
-
-    const resetDriveData = async () => {
-        if (!confirm('🚨 ATENÇÃO: Isso apagará TODOS os lançamentos do Google Drive!')) return;
-        const url = state.settings.googleScriptUrl;
-        if (!url) {
-            showToast('⚠️ URL do Google Drive não configurada.', 'error');
-            return;
-        }
-        try {
-            showToast('🔄 Resetando dados do Drive...', 'info');
-            const res = await fetch(url, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({
-                    action: 'sync',
-                    token: state.settings.apiToken || DEFAULT_TOKEN,
-                    transactions: []
-                })
-            });
-            const data = await res.json();
-            if (data.status === 'success') {
-                state.transactions = [];
-                saveState();
-                refreshAllViews();
-                showToast('✅ Dados do Drive resetados!');
-            } else {
-                showToast('❌ Falha ao resetar no Drive.', 'error');
-            }
-        } catch (e) {
-            showToast('❌ Erro ao resetar dados do Drive.', 'error');
-            console.error(e);
-        }
-    };
-
-    // ==================== GERENCIAMENTO DE USUÁRIOS ====================
-    const renderUserManagement = () => {
-        const users = state.users || [];
-        
-        return `
-        <div style="margin-top: 30px; border-top: 2px solid var(--border); padding-top: 20px;">
-            <h4 style="color: var(--navy); margin-bottom: 16px;">👥 Gerenciar Usuários</h4>
-            <p style="font-size:13px;color:var(--text-light);margin-bottom:16px;">
-                Adicione outros membros da família para compartilhar o controle financeiro.
-            </p>
-            
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-                <input type="text" id="newUserName" class="input-field" placeholder="Nome do usuário" style="width: 100%;">
-                <input type="email" id="newUserEmail" class="input-field" placeholder="Email" style="width: 100%;">
-            </div>
-            <div style="display: flex; gap: 12px; margin-bottom: 20px;">
-                <input type="password" id="newUserPwd" class="input-field" placeholder="Senha (mínimo 6 caracteres)" style="flex: 1;">
-                <button onclick="App.addUser()" class="btn-primary" style="white-space: nowrap;">➕ Adicionar</button>
-            </div>
-            
-            <div class="table-container">
-                <table class="data-table">
-                    <thead>
-                        <tr>
-                            <th>Nome</th>
-                            <th>Email</th>
-                            <th>Função</th>
-                            <th style="text-align: center;">Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${users.length === 0 ? `
-                            <tr><td colspan="4" style="text-align: center; color: var(--text-light); padding: 30px;">
-                                Nenhum usuário cadastrado.
-                            </td></tr>
-                        ` : users.map(u => `
-                            <tr>
-                                <td><strong>${u.name}</strong></td>
-                                <td>${u.email}</td>
-                                <td><span class="badge ${u.role === 'admin' ? 'badge-warning' : 'badge-info'}">${u.role || 'user'}</span></td>
-                                <td style="text-align: center;">
-                                    ${u.id !== state.currentUser?.id ? `
-                                        <button onclick="App.deleteUser('${u.id}')" style="background:#fee2e2;color:#b91c1c;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">
-                                            🗑️ Remover
-                                        </button>
-                                    ` : `
-                                        <span style="font-size:12px;color:var(--text-light);">👤 Você</span>
-                                    `}
-                                </td>
-                            </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
-            </div>
-            <p style="font-size:12px;color:var(--text-light);margin-top:8px;">
-                💡 O usuário atual não pode ser removido.
-            </p>
-        </div>
-        `;
-    };
-
-    // ADICIONAR USUÁRIO
-    const addUser = async () => {
-        const name = el('newUserName')?.value.trim();
-        const email = el('newUserEmail')?.value.trim().toLowerCase();
-        const pwd = el('newUserPwd')?.value;
-        
-        if (!name || !email || !pwd) {
-            showToast('⚠️ Preencha todos os campos.', 'error');
-            return;
-        }
-        if (pwd.length < 6) {
-            showToast('⚠️ A senha deve ter no mínimo 6 caracteres.', 'error');
-            return;
-        }
-        if (state.users.find(u => u.email === email)) {
-            showToast('⚠️ Este email já está cadastrado.', 'error');
-            return;
-        }
-        
-        const passwordHash = await hashPwd(pwd);
-        const user = {
-            id: generateId(),
-            name,
-            email,
-            passwordHash,
-            role: 'user',
-            createdAt: now()
-        };
-        
-        state.users.push(user);
-        saveState();
-        
-        el('newUserName').value = '';
-        el('newUserEmail').value = '';
-        el('newUserPwd').value = '';
-        
-        showToast(`✅ Usuário ${name} adicionado com sucesso!`);
-        
-        const settingsPage = el('settings');
-        if (settingsPage) settingsPage.innerHTML = renderSettings();
-    };
-
-    // REMOVER USUÁRIO
-    const deleteUser = (userId) => {
-        if (userId === state.currentUser?.id) {
-            showToast('⚠️ Você não pode remover seu próprio usuário!', 'error');
-            return;
-        }
-        
-        const user = state.users.find(u => u.id === userId);
-        if (!user) return;
-        
-        if (!confirm(`⚠️ Deseja realmente remover o usuário "${user.name}"?`)) {
-            return;
-        }
-        
-        state.users = state.users.filter(u => u.id !== userId);
-        saveState();
-        showToast(`🗑️ Usuário ${user.name} removido.`);
-        
-        const settingsPage = el('settings');
-        if (settingsPage) settingsPage.innerHTML = renderSettings();
-    };
-
-    // ==================== AUTH & SETUP ====================
-    const doSetup = async () => {
-        const name = el('setupName')?.value.trim();
-        const email = el('setupEmail')?.value.trim().toLowerCase();
-        const pwd = el('setupPwd')?.value;
-        const curBR = el('setupCurBR')?.value.trim() || 'R$';
-        const curES = el('setupCurES')?.value.trim() || '€';
-
-        if (!name || !email || !pwd) {
-            showToast('⚠️ Preencha todos os campos.', 'error');
-            return;
-        }
-        if (pwd.length < 6) {
-            showToast('⚠️ A senha deve ter no mínimo 6 caracteres.', 'error');
-            return;
-        }
-
-        const passwordHash = await hashPwd(pwd);
-        const user = {
-            id: generateId(),
-            name,
-            email,
-            passwordHash,
-            role: 'admin',
-            createdAt: now()
-        };
-
-        state.users = [user];
-        state.settings.currencyBR = curBR;
-        state.settings.currencyES = curES;
-        saveState();
-        setSession(user.id);
-        renderApp();
-        showToast('✅ Conta criada com sucesso!');
-    };
-
-    const doLogin = async () => {
-        const email = el('loginEmail')?.value.trim().toLowerCase();
-        const pwd = el('loginPwd')?.value;
-        if (!email || !pwd) {
-            showToast('⚠️ Preencha email e senha.', 'error');
-            return;
-        }
-        const user = state.users.find(u => String(u.email).toLowerCase() === email);
-        if (!user) { 
-            showToast('❌ Usuário não encontrado.', 'error'); 
-            return; 
-        }
-        const hash = await hashPwd(pwd);
-        if (user.passwordHash !== hash) { 
-            showToast('❌ Senha incorreta.', 'error'); 
-            return; 
-        }
-        setSession(user.id);
-        renderApp();
-        showLoading("Conectando ao Google Drive...");
-        syncFromDrive(true);
-        showToast('✅ Sessão iniciada!');
-    };
-
-    const logout = () => {
-        clearSession();
-        init();
-    };
-
-      const nav = (element) => {
+    // ==================== NAVEGAÇÃO ====================
+    const nav = (element) => {
         document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
         element.classList.add('active');
         const targetPage = element.getAttribute('data-page');
         const p = el(targetPage);
         if (p) p.classList.add('active');
-        
-        if (targetPage === 'settings') {
-            const settingsPage = el('settings');
-            if (settingsPage) settingsPage.innerHTML = renderSettings();
-        } else if (targetPage === 'reports') {
-            const reportContainer = el('reportContainer');
-            if (reportContainer) {
-                reportContainer.innerHTML = renderMonthlyReport();
-                const monthPicker = el('reportMonthPicker');
-                if (monthPicker) monthPicker.value = state.selectedMonth;
-            }
+
+        if (targetPage === 'reports') {
+            const rc = el('reportContainer');
+            if (rc) rc.innerHTML = renderMonthlyReport();
+        } else if (targetPage === 'transactions') {
+            const tb = el('transactionsTable');
+            if (tb) tb.innerHTML = renderTransactionsTable();
+        } else if (targetPage === 'dashboard') {
+            const d = el('dashboard');
+            if (d) d.innerHTML = renderDashboard();
         }
     };
 
+    const refreshAllViews = () => {
+        const activePage = document.querySelector('.page.active')?.id || 'dashboard';
+        if (activePage === 'dashboard') {
+            const dash = el('dashboard');
+            if (dash) dash.innerHTML = renderDashboard();
+        }
+        if (activePage === 'transactions') {
+            const txTable = el('transactionsTable');
+            if (txTable) txTable.innerHTML = renderTransactionsTable();
+        }
+        if (activePage === 'reports') {
+            const rc = el('reportContainer');
+            if (rc) rc.innerHTML = renderMonthlyReport();
+        }
+        const monthPicker = el('dashMonthPicker');
+        if (monthPicker) monthPicker.value = state.selectedMonth;
+    };
+    // ==================== CÁLCULOS DO DASHBOARD ====================
+    const getSelectedMonthData = () => {
+        const ym = state.selectedMonth;
+        const txs = (state.transactions || []).filter(t => {
+            if (!t || !t.date) return false;
+            return getYearMonth(t.date) === ym;
+        }).sort((a, b) => (b.date > a.date ? 1 : -1));
 
-    const togglePrivacy = () => {
-        state.privacyMode = !state.privacyMode;
+        const income = txs.filter(t => (t.type || '').toLowerCase() === 'income')
+                          .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const expense = txs.filter(t => (t.type || '').toLowerCase() === 'expense')
+                           .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const investment = txs.filter(t => (t.type || '').toLowerCase() === 'investment')
+                              .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
+        const balance = income - expense - investment;
+        const totalInvestments = (state.transactions || [])
+            .filter(t => (t.type || '').toLowerCase() === 'investment')
+            .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
+        const totalIncomeAll = (state.transactions || [])
+            .filter(t => (t.type || '').toLowerCase() === 'income')
+            .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const totalExpenseAll = (state.transactions || [])
+            .filter(t => (t.type || '').toLowerCase() === 'expense')
+            .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+
+        const netWorth = (totalIncomeAll - totalExpenseAll);
+
+        return { ym, txs, income, expense, investment, balance, netWorth, totalInvestments };
+    };
+
+    const changeSelectedMonth = (ym) => {
+        if (!ym) return;
+        state.selectedMonth = ym;
+        saveState();
         refreshAllViews();
     };
-    // ==================== RENDERIZAÇÃO ====================
-    const renderLogin = () => {
-        el('app').innerHTML = `
-            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--bg);">
-                <div class="card" style="max-width: 420px; width: 100%; padding: 40px; text-align: center;">
-                    <div style="font-size: 48px; margin-bottom: 12px;">💶</div>
-                    <h2 style="color: var(--navy); margin-bottom: 8px;">FinFam</h2>
-                    <p style="color: var(--text-light); margin-bottom: 24px; font-size: 14px;">Controle Financeiro Familiar (ES 🇪🇸 & BR 🇧🇷)</p>
-                    <form onsubmit="event.preventDefault(); App.doLogin();">
-                        <div class="form-group" style="text-align: left;">
-                            <label class="form-label">Email</label>
-                            <input type="email" id="loginEmail" class="input-field" placeholder="seu@email.com" required>
-                        </div>
-                        <div class="form-group" style="text-align: left;">
-                            <label class="form-label">Senha</label>
-                            <input type="password" id="loginPwd" class="input-field" placeholder="••••••••" required>
-                        </div>
-                        <button type="submit" class="btn-primary" style="width: 100%; margin-top: 10px; padding: 12px;">Entrar</button>
-                    </form>
-                </div>
-            </div>
-            <div id="toast" class="toast"></div>
-        `;
-    };
 
-    const renderSetup = () => {
-        el('app').innerHTML = `
-            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; background: var(--bg);">
-                <div class="card" style="max-width: 480px; width: 100%; padding: 40px;">
-                    <div style="text-align: center; margin-bottom: 24px;">
-                        <div style="font-size: 48px; margin-bottom: 12px;">👋</div>
-                        <h2 style="color: var(--navy); margin-bottom: 8px;">Bem-vindo ao FinFam!</h2>
-                        <p style="color: var(--text-light); font-size: 14px;">Configure o seu usuário administrador para começar.</p>
-                    </div>
-                    <form onsubmit="event.preventDefault(); App.doSetup();">
-                        <div class="form-group">
-                            <label class="form-label">Seu Nome</label>
-                            <input type="text" id="setupName" class="input-field" placeholder="Ex: João Silva" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Email</label>
-                            <input type="email" id="setupEmail" class="input-field" placeholder="seu@email.com" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Senha (mínimo 6 caracteres)</label>
-                            <input type="password" id="setupPwd" class="input-field" placeholder="••••••••" minlength="6" required>
-                        </div>
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                            <div class="form-group">
-                                <label class="form-label">Moeda BR</label>
-                                <input type="text" id="setupCurBR" class="input-field" value="R$">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Moeda ES</label>
-                                <input type="text" id="setupCurES" class="input-field" value="€">
-                            </div>
-                        </div>
-                        <button type="submit" class="btn-primary" style="width: 100%; margin-top: 10px; padding: 12px;">Criar Conta e Iniciar</button>
-                    </form>
-                </div>
-            </div>
-            <div id="toast" class="toast"></div>
-        `;
-    };
-
+    // ==================== RENDERIZAÇÃO DASHBOARD ====================
     const renderDashboard = () => {
-        const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
-        const txs = state.transactions.filter(t => t.date && t.date.startsWith(selMonth));
-
-        const incES = txs.filter(t => t.country === 'ES' && t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
-        const expES = txs.filter(t => t.country === 'ES' && t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
-        const invES = txs.filter(t => t.country === 'ES' && t.type === 'investment').reduce((acc, t) => acc + t.amount, 0);
-        const balES = incES - expES - invES;
-
-        const incBR = txs.filter(t => t.country === 'BR' && t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
-        const expBR = txs.filter(t => t.country === 'BR' && t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
-        const invBR = txs.filter(t => t.country === 'BR' && t.type === 'investment').reduce((acc, t) => acc + t.amount, 0);
-        const balBR = incBR - expBR - invBR;
+        const m = getSelectedMonthData();
+        const expByCategory = {};
+        m.txs.filter(t => (t.type || '').toLowerCase() === 'expense').forEach(t => {
+            const catName = getCategoryById(t.categoryId).name;
+            expByCategory[catName] = (expByCategory[catName] || 0) + (Number(t.amount) || 0);
+        });
+        const sortedCats = Object.entries(expByCategory).sort((a, b) => b[1] - a[1]);
 
         return `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-                <div>
-                    <h2 style="color: var(--navy); margin: 0 0 4px 0;">Painel Financeiro</h2>
-                    <p style="color: var(--text-light); margin: 0; font-size: 14px;">Resumo consolidado das finanças em Espanha e Brasil</p>
-                </div>
-                <div style="display: flex; gap: 12px; align-items: center;">
-                    <input type="month" id="dashMonthPicker" class="input-field" value="${selMonth}" onchange="App.changeSelectedMonth(this.value)" style="width: auto;">
-                    <button class="btn-primary" onclick="App.showTransactionModal(null)">+ Novo Lançamento</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+            <div>
+                <h2 style="margin:0;font-size:22px;color:var(--navy)">Visão Geral do Mês</h2>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Acompanhamento consolidado da família</p>
+            </div>
+            <div style="display:flex;gap:10px;align-items:center">
+                <input type="month" id="dashMonthPicker" class="input-field" style="padding:8px 12px;font-weight:600" value="${state.selectedMonth}" onchange="App.changeSelectedMonth(this.value)">
+                <button class="btn-primary" onclick="App.showTransactionModal(null)">+ Novo Lançamento</button>
+            </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px">
+            <div class="card stat-card"><div class="stat-label">Saldo Livre</div><div class="stat-value ${m.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.balance, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Receitas</div><div class="stat-value emerald-text">${fmtMoney(m.income, state.settings.currencyES)}</div></div>
+            <div class="card stat-card"><div class="stat-label">Despesas</div><div class="stat-value danger-text">${fmtMoney(m.expense, state.settings.currencyES)}</div></div>
+            <div class="card stat-card" style="border-left:4px solid #8b5cf6"><div class="stat-label">Investimentos / Aportes</div><div class="stat-value" style="color:#8b5cf6">${fmtMoney(m.investment, state.settings.currencyES)}</div></div>
+            <div class="card stat-card net-worth-card">
+                <div class="stat-label">🏦 Patrimônio Total</div>
+                <div class="net-worth-value">${fmtMoney(m.netWorth, state.settings.currencyES)}</div>
+                <div style="font-size:11px;color:var(--text-light);margin-top:4px;">
+                    Investimentos Acumulados: ${fmtMoney(m.totalInvestments, state.settings.currencyES)}
                 </div>
             </div>
+        </div>
 
-            <!-- ESPANHA -->
-            <h3 style="color: var(--navy); margin-bottom: 12px; font-size: 16px;">🇪🇸 Espanha (${state.settings.currencyES})</h3>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
-                <div class="card stat-card">
-                    <div class="stat-label">Receitas</div>
-                    <div class="stat-value emerald-text">${fmtMoney(incES, state.settings.currencyES)}</div>
-                </div>
-                <div class="card stat-card">
-                    <div class="stat-label">Despesas</div>
-                    <div class="stat-value danger-text">${fmtMoney(expES, state.settings.currencyES)}</div>
-                </div>
-                <div class="card stat-card">
-                    <div class="stat-label">Investimentos</div>
-                    <div class="stat-value" style="color: var(--purple);">${fmtMoney(invES, state.settings.currencyES)}</div>
-                </div>
-                <div class="card stat-card">
-                    <div class="stat-label">Saldo</div>
-                    <div class="stat-value ${balES >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(balES, state.settings.currencyES)}</div>
-                </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;margin-bottom:24px">
+            <div class="card" style="padding:24px">
+                <h3 style="margin:0 0 20px;font-size:16px;color:var(--navy);display:flex;align-items:center;gap:8px">📊 Gastos por Categoria</h3>
+                ${sortedCats.length === 0 ? '<p style="color:var(--text-light);font-size:14px">Sem despesas registradas no período.</p>' : 
+                    sortedCats.slice(0, 5).map(([cat, val]) => {
+                        const pct = m.expense > 0 ? ((val / m.expense) * 100).toFixed(1) : 0;
+                        return `<div style="margin-bottom:16px">
+                            <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px;font-weight:600;color:var(--navy)">
+                                <span>${cat}</span>
+                                <span>${fmtMoney(val, state.settings.currencyES)} (${pct}%)</span>
+                            </div>
+                            <div style="width:100%;background:#f1f5f9;height:8px;border-radius:4px;overflow:hidden">
+                                <div style="width:${pct}%;background:var(--navy);height:100%"></div>
+                            </div>
+                        </div>`;
+                    }).join('')
+                }
             </div>
-
-            <!-- BRASIL -->
-            <h3 style="color: var(--navy); margin-bottom: 12px; font-size: 16px;">🇧🇷 Brasil (${state.settings.currencyBR})</h3>
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 32px;">
-                <div class="card stat-card">
-                    <div class="stat-label">Receitas</div>
-                    <div class="stat-value emerald-text">${fmtMoney(incBR, state.settings.currencyBR)}</div>
-                </div>
-                <div class="card stat-card">
-                    <div class="stat-label">Despesas</div>
-                    <div class="stat-value danger-text">${fmtMoney(expBR, state.settings.currencyBR)}</div>
-                </div>
-                <div class="card stat-card">
-                    <div class="stat-label">Investimentos</div>
-                    <div class="stat-value" style="color: var(--purple);">${fmtMoney(invBR, state.settings.currencyBR)}</div>
-                </div>
-                <div class="card stat-card">
-                    <div class="stat-label">Saldo</div>
-                    <div class="stat-value ${balBR >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(balBR, state.settings.currencyBR)}</div>
-                </div>
-            </div>
-
-            <!-- GRÁFICOS -->
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; margin-bottom: 32px;">
-                <div class="card" style="padding: 20px;">
-                    <h4 style="margin: 0 0 16px 0; color: var(--navy);">Despesas por Categoria (Espanha)</h4>
-                    <div style="position: relative; height: 260px;">
-                        <canvas id="chartExpensesES"></canvas>
+            <div class="card" style="padding:24px">
+                <h3 style="margin:0 0 20px;font-size:16px;color:var(--navy)">⚡ Lançamentos Recentes do Mês</h3>
+                ${m.txs.length === 0 ? '<p style="color:var(--text-light);font-size:14px">Nenhuma transação registrada neste mês.</p>' : `
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead><tr><th>Data</th><th>Tipo</th><th>Descrição</th><th style="text-align:right">Valor</th></tr></thead>
+                            <tbody>${m.txs.slice(0, 5).map(t => {
+                                const isInc = (t.type || '').toLowerCase() === 'income';
+                                const isInv = (t.type || '').toLowerCase() === 'investment';
+                                const moeda = (t.country === 'BR') ? state.settings.currencyBR : state.settings.currencyES;
+                                return `<tr>
+                                    <td>${fmtDate(t.date)}</td>
+                                    <td><span class="badge ${isInc ? 'badge-success' : isInv ? 'badge-purple' : 'badge-danger'}">${isInc ? 'Receita' : isInv ? 'Investimento' : 'Despesa'}</span></td>
+                                    <td>${t.description || '-'}</td>
+                                    <td style="text-align:right;font-weight:600;" class="${isInc ? 'emerald-text' : isInv ? '' : 'danger-text'}">
+                                        ${isInc ? '+' : isInv ? '' : '-'}${fmtMoney(t.amount, moeda)}
+                                    </td>
+                                </tr>`;
+                            }).join('')}</tbody>
+                        </table>
                     </div>
-                </div>
-                <div class="card" style="padding: 20px;">
-                    <h4 style="margin: 0 0 16px 0; color: var(--navy);">Comparativo Mensal</h4>
-                    <div style="position: relative; height: 260px;">
-                        <canvas id="chartComparison"></canvas>
-                    </div>
-                </div>
+                `}
             </div>
-        `;
+        </div>`;
     };
 
-    const renderTransactions = () => {
-        const txs = [...state.transactions].sort((a, b) => new Date(b.date) - new Date(a.date));
+    // ==================== LISTA DE TRANSAÇÕES ====================
+    const renderTransactionRow = (t) => {
+        const cat = getCategoryById(t.categoryId);
+        const isBR = (t.country === 'BR');
+        const moeda = isBR ? (state.settings.currencyBR || 'R$') : (state.settings.currencyES || '€');
+        const typeStr = (t.type || '').toLowerCase();
 
-        return `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-                <div>
-                    <h2 style="color: var(--navy); margin: 0 0 4px 0;">Lançamentos</h2>
-                    <p style="color: var(--text-light); margin: 0; font-size: 14px;">Histórico completo de transações registradas</p>
-                </div>
-                <div style="display: flex; gap: 12px;">
-                    <button class="btn-primary" onclick="App.showTransactionModal(null)">+ Novo Lançamento</button>
-                </div>
-            </div>
+        let typeBadge = '<span class="badge badge-danger">Despesa</span>';
+        let valClass = 'danger-text';
+        let sinal = '-';
 
-            <div class="card" style="padding: 20px;">
-                <div class="table-container">
-                    <table class="data-table">
-                        <thead>
-                            <tr>
-                                <th>Data</th>
-                                <th>Descrição</th>
-                                <th>Categoria</th>
-                                <th>Responsável</th>
-                                <th>País</th>
-                                <th>Tipo</th>
-                                <th style="text-align: right;">Valor</th>
-                                <th style="text-align: center;">Ações</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${txs.length === 0 ? `
-                                <tr><td colspan="8" style="text-align: center; color: var(--text-light); padding: 40px;">Nenhum lançamento encontrado.</td></tr>
-                            ` : txs.map(t => {
-                                const cat = state.categories.find(c => c.id === t.categoryId);
-                                const isExpense = t.type === 'expense';
-                                const isIncome = t.type === 'income';
-                                const cur = t.country === 'BR' ? state.settings.currencyBR : state.settings.currencyES;
-                                return `
-                                    <tr>
-                                        <td>${fmtDate(t.date)}</td>
-                                        <td><strong>${t.description || '-'}</strong></td>
-                                        <td><span class="category-tag">${cat ? cat.icon + ' ' + cat.name : '-'}</span></td>
-                                        <td><span class="badge badge-info">${t.assignedTo || 'Casal'}</span></td>
-                                        <td>${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</td>
-                                        <td>
-                                            <span class="badge ${isIncome ? 'badge-success' : isExpense ? 'badge-danger' : 'badge-purple'}">
-                                                ${isIncome ? 'Receita' : isExpense ? 'Despesa' : 'Investimento'}
-                                            </span>
-                                        </td>
-                                        <td style="text-align: right; font-weight: 600;" class="${isIncome ? 'emerald-text' : isExpense ? 'danger-text' : ''}">
-                                            ${isExpense ? '-' : isIncome ? '+' : ''}${fmtMoney(t.amount, cur)}
-                                        </td>
-                                        <td style="text-align: center;">
-                                            <button onclick="App.showTransactionModal('${t.id}')" style="background:#e0f2fe;color:#0369a1;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;margin-right:6px;">✏️</button>
-                                            <button onclick="App.deleteTransaction('${t.id}')" style="background:#fee2e2;color:#b91c1c;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px;">🗑️</button>
-                                        </td>
-                                    </tr>
-                                `;
-                            }).join('')}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        `;
-    };
-
- const renderMonthlyReport = () => {
-    const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
-
-    const getYearMonth = (dateStr) => {
-        if (!dateStr) return '';
-        const s = String(dateStr).trim();
-        if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 7);
-        const brMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-        if (brMatch) return `${brMatch[3]}-${brMatch[2].padStart(2, '0')}`;
-        try {
-            const d = new Date(s);
-            if (!isNaN(d.getTime())) return d.toISOString().slice(0, 7);
-        } catch (e) {}
-        return '';
-    };
-
-    // Todos os lançamentos do mês
-    const txs = (state.transactions || []).filter(t => {
-        if (!t || !t.date) return false;
-        return getYearMonth(t.date) === selMonth;
-    }).sort((a, b) => (b.date > a.date ? 1 : -1));
-
-    // Filtros Espanha
-    const recES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'income');
-    const expES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'expense');
-    const invES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'investment');
-
-    // Filtros Brasil
-    const recBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'income');
-    const expBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'expense');
-    const invBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'investment');
-
-    // Totais Espanha
-    const totalRecES = recES.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const totalExpES = expES.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const totalInvES = invES.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const saldoES = totalRecES - totalExpES - totalInvES;
-
-    // Totais Brasil
-    const totalRecBR = recBR.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const totalExpBR = expBR.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const totalInvBR = invBR.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const saldoBR = totalRecBR - totalExpBR - totalInvBR;
-
-    const currES = state.settings?.currencyES || '€';
-    const currBR = state.settings?.currencyBR || 'R$';
-
-    // Gerador de tabela para evitar repetição de código
-    const renderTable = (lista, moeda, corValor = '') => {
-        if (!lista.length) {
-            return `<tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:14px;">Nenhum registro.</td></tr>`;
+        if (typeStr === 'income') {
+            typeBadge = '<span class="badge badge-success">Receita</span>';
+            valClass = 'emerald-text';
+            sinal = '+';
+        } else if (typeStr === 'investment') {
+            typeBadge = '<span class="badge badge-purple" style="background:#ede9fe;color:#8b5cf6;">Investimento</span>';
+            valClass = '';
+            sinal = '';
         }
-        return lista.map(t => {
-            const cat = (state.categories || []).find(c => c.id === t.categoryId);
-            return `
-                <tr>
+
+        return `<tr>
+            <td style="white-space:nowrap">${fmtDate(t.date)}</td>
+            <td>${typeBadge}</td>
+            <td><span class="category-tag">${cat.icon} ${cat.name}</span></td>
+            <td><strong>${t.description || '-'}</strong></td>
+            <td>${t.assignedTo || 'Casal'}</td>
+            <td>${isBR ? '🇧🇷 BR' : '🇪🇸 ES'}</td>
+            <td style="text-align:right;font-weight:700" class="${valClass}">
+                ${sinal}${fmtMoney(t.amount, moeda)}
+            </td>
+            <td style="text-align:right;white-space:nowrap">
+                <button onclick="App.showTransactionModal('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px;margin-right:6px;" title="Editar">✏️</button>
+                <button onclick="App.deleteTransaction('${t.id}')" style="background:none;border:none;cursor:pointer;font-size:16px;" title="Excluir">🗑️</button>
+            </td>
+        </tr>`;
+    };
+
+    const renderTransactionsTable = () => {
+        const txs = (state.transactions || []).slice().sort((a, b) => (b.date > a.date ? 1 : -1));
+        if (txs.length === 0) return `<div class="empty-state"><p>Nenhum lançamento cadastrado no banco de dados.</p></div>`;
+        return `
+        <div class="table-container">
+            <table class="data-table">
+                <thead><tr><th>Data</th><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Responsável</th><th>País</th><th style="text-align:right">Valor</th><th style="text-align:right">Ações</th></tr></thead>
+                <tbody>${txs.map(t => renderTransactionRow(t)).join('')}</tbody>
+            </table>
+        </div>`;
+    };
+
+    const renderTransactions = () => `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+            <div>
+                <h2 style="margin:0;font-size:22px;color:var(--navy)">Histórico Completo de Lançamentos</h2>
+                <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Visualização geral de todas as movimentações</p>
+            </div>
+            <button class="btn-primary" onclick="App.showTransactionModal(null)">+ Novo Lançamento</button>
+        </div>
+        <div class="card" style="padding:20px">
+            <div id="transactionsTable">${renderTransactionsTable()}</div>
+        </div>`;
+
+    // ==================== RELATÓRIOS MENSAIS ====================
+    const renderMonthlyReport = () => {
+        const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
+        const txs = (state.transactions || []).filter(t => t && t.date && getYearMonth(t.date) === selMonth)
+                                              .sort((a, b) => (b.date > a.date ? 1 : -1));
+
+        const currES = state.settings.currencyES || '€';
+        const currBR = state.settings.currencyBR || 'R$';
+
+        // Espanha
+        const recES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'income');
+        const expES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'expense');
+        const invES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'investment');
+        const totRecES = recES.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const totExpES = expES.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const totInvES = invES.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const saldoES = totRecES - totExpES - totInvES;
+
+        // Brasil
+        const recBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'income');
+        const expBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'expense');
+        const invBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'investment');
+        const totRecBR = recBR.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const totExpBR = expBR.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const totInvBR = invBR.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+        const saldoBR = totRecBR - totExpBR - totInvBR;
+
+        const renderSubTable = (lista, moeda, cor = '') => {
+            if (!lista.length) return `<tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:14px;">Nenhum registro.</td></tr>`;
+            return lista.map(t => {
+                const cat = getCategoryById(t.categoryId);
+                return `<tr>
                     <td>${fmtDate(t.date)}</td>
                     <td><strong>${t.description || '-'}</strong></td>
-                    <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
+                    <td>${cat.icon} ${cat.name}</td>
                     <td>${t.assignedTo || 'Casal'}</td>
-                    <td style="text-align: right; font-weight: 600;" class="${corValor}">
-                        ${fmtMoney(t.amount, moeda)}
-                    </td>
-                </tr>
-            `;
-        }).join('');
-    };
+                    <td style="text-align:right;font-weight:600;" class="${cor}">${fmtMoney(t.amount, moeda)}</td>
+                </tr>`;
+            }).join('');
+        };
 
-    return `
+        return `
         <div id="reportContainer">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:16px;">
                 <div>
-                    <h2 style="color: var(--navy); margin: 0 0 4px 0;">Relatório Mensal</h2>
-                    <p style="color: var(--text-light); margin: 0; font-size: 14px;">Detalhamento financeiro (${txs.length} lançamentos no mês)</p>
+                    <h2 style="color:var(--navy);margin:0 0 4px 0;">Relatório Mensal Consolidado</h2>
+                    <p style="color:var(--text-light);margin:0;font-size:14px;">Total de ${txs.length} movimentação(ões) no período selecionado</p>
                 </div>
-                <div style="display: flex; gap: 12px; align-items: center;">
-                    <input type="month" id="reportMonthPicker" class="input-field" value="${selMonth}" onchange="App.changeReportMonth(this.value)" style="width: auto;">
+                <div style="display:flex;gap:12px;align-items:center;">
+                    <input type="month" id="reportMonthPicker" class="input-field" value="${selMonth}" onchange="App.changeReportMonth(this.value)" style="width:auto;">
                     <button class="btn-secondary" onclick="App.exportToPDF()">📄 PDF</button>
-                    <button class="btn-secondary" onclick="App.exportToCSV()">📊 CSV</button>
+                    <button class="btn-secondary" onclick="App.exportToCSV()">📊 Excel / CSV</button>
                 </div>
             </div>
 
             <!-- SEÇÃO ESPANHA 🇪🇸 -->
-            <div class="card" style="padding: 24px; margin-bottom: 24px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 2px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; flex-wrap:wrap; gap:8px;">
-                    <h3 style="color: var(--navy); margin: 0;">🇪🇸 Espanha</h3>
-                    <div style="font-size: 14px; font-weight: 600;">
-                        <span class="emerald-text">Rec: +${fmtMoney(totalRecES, currES)}</span> | 
-                        <span class="danger-text">Desp: -${fmtMoney(totalExpES, currES)}</span> | 
-                        <span style="color:#8b5cf6">Inv: ${fmtMoney(totalInvES, currES)}</span> | 
+            <div class="card" style="padding:24px;margin-bottom:24px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--border);padding-bottom:12px;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+                    <h3 style="color:var(--navy);margin:0;">🇪🇸 Espanha</h3>
+                    <div style="font-size:14px;font-weight:600;">
+                        <span class="emerald-text">Rec: +${fmtMoney(totRecES, currES)}</span> | 
+                        <span class="danger-text">Desp: -${fmtMoney(totExpES, currES)}</span> | 
+                        <span style="color:#8b5cf6">Inv: ${fmtMoney(totInvES, currES)}</span> | 
                         <span>Saldo: <strong>${fmtMoney(saldoES, currES)}</strong></span>
                     </div>
                 </div>
 
-                <!-- Receitas ES -->
-                <h4 style="color: var(--emerald); margin: 12px 0 8px 0;">🟢 Receitas (+${fmtMoney(totalRecES, currES)})</h4>
-                <div class="table-container" style="margin-bottom: 20px;">
+                <h4 style="color:var(--emerald);margin:12px 0 8px 0;">🟢 Receitas (+${fmtMoney(totRecES, currES)})</h4>
+                <div class="table-container" style="margin-bottom:20px;">
                     <table class="data-table">
-                        <thead>
-                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
-                        </thead>
-                        <tbody>${renderTable(recES, currES, 'emerald-text')}</tbody>
+                        <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align:right">Valor</th></tr></thead>
+                        <tbody>${renderSubTable(recES, currES, 'emerald-text')}</tbody>
                     </table>
                 </div>
 
-                <!-- Despesas ES -->
-                <h4 style="color: var(--danger); margin: 12px 0 8px 0;">🔴 Despesas (-${fmtMoney(totalExpES, currES)})</h4>
-                <div class="table-container" style="margin-bottom: 20px;">
+                <h4 style="color:var(--danger);margin:12px 0 8px 0;">🔴 Despesas (-${fmtMoney(totExpES, currES)})</h4>
+                <div class="table-container" style="margin-bottom:20px;">
                     <table class="data-table">
-                        <thead>
-                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
-                        </thead>
-                        <tbody>${renderTable(expES, currES, 'danger-text')}</tbody>
+                        <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align:right">Valor</th></tr></thead>
+                        <tbody>${renderSubTable(expES, currES, 'danger-text')}</tbody>
                     </table>
                 </div>
 
-                <!-- Investimentos ES -->
                 ${invES.length > 0 ? `
-                    <h4 style="color: #8b5cf6; margin: 12px 0 8px 0;">🟣 Investimentos (${fmtMoney(totalInvES, currES)})</h4>
+                    <h4 style="color:#8b5cf6;margin:12px 0 8px 0;">🟣 Investimentos (${fmtMoney(totInvES, currES)})</h4>
                     <div class="table-container">
                         <table class="data-table">
-                            <thead>
-                                <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
-                            </thead>
-                            <tbody>${renderTable(invES, currES, '')}</tbody>
+                            <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align:right">Valor</th></tr></thead>
+                            <tbody>${renderSubTable(invES, currES, '')}</tbody>
                         </table>
                     </div>
                 ` : ''}
             </div>
 
             <!-- SEÇÃO BRASIL 🇧🇷 -->
-            <div class="card" style="padding: 24px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 2px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; flex-wrap:wrap; gap:8px;">
-                    <h3 style="color: var(--navy); margin: 0;">🇧🇷 Brasil</h3>
-                    <div style="font-size: 14px; font-weight: 600;">
-                        <span class="emerald-text">Rec: +${fmtMoney(totalRecBR, currBR)}</span> | 
-                        <span class="danger-text">Desp: -${fmtMoney(totalExpBR, currBR)}</span> | 
+            <div class="card" style="padding:24px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid var(--border);padding-bottom:12px;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
+                    <h3 style="color:var(--navy);margin:0;">🇧🇷 Brasil</h3>
+                    <div style="font-size:14px;font-weight:600;">
+                        <span class="emerald-text">Rec: +${fmtMoney(totRecBR, currBR)}</span> | 
+                        <span class="danger-text">Desp: -${fmtMoney(totExpBR, currBR)}</span> | 
+                        <span style="color:#8b5cf6">Inv: ${fmtMoney(totInvBR, currBR)}</span> | 
                         <span>Saldo: <strong>${fmtMoney(saldoBR, currBR)}</strong></span>
                     </div>
                 </div>
 
-                <!-- Receitas BR -->
-                <h4 style="color: var(--emerald); margin: 12px 0 8px 0;">🟢 Receitas (+${fmtMoney(totalRecBR, currBR)})</h4>
-                <div class="table-container" style="margin-bottom: 20px;">
+                <h4 style="color:var(--emerald);margin:12px 0 8px 0;">🟢 Receitas (+${fmtMoney(totRecBR, currBR)})</h4>
+                <div class="table-container" style="margin-bottom:20px;">
                     <table class="data-table">
-                        <thead>
-                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
-                        </thead>
-                        <tbody>${renderTable(recBR, currBR, 'emerald-text')}</tbody>
+                        <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align:right">Valor</th></tr></thead>
+                        <tbody>${renderSubTable(recBR, currBR, 'emerald-text')}</tbody>
                     </table>
                 </div>
 
-                <!-- Despesas BR -->
-                <h4 style="color: var(--danger); margin: 12px 0 8px 0;">🔴 Despesas (-${fmtMoney(totalExpBR, currBR)})</h4>
-                <div class="table-container">
+                <h4 style="color:var(--danger);margin:12px 0 8px 0;">🔴 Despesas (-${fmtMoney(totExpBR, currBR)})</h4>
+                <div class="table-container" style="margin-bottom:20px;">
                     <table class="data-table">
-                        <thead>
-                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
-                        </thead>
-                        <tbody>${renderTable(expBR, currBR, 'danger-text')}</tbody>
+                        <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align:right">Valor</th></tr></thead>
+                        <tbody>${renderSubTable(expBR, currBR, 'danger-text')}</tbody>
                     </table>
                 </div>
+
+                ${invBR.length > 0 ? `
+                    <h4 style="color:#8b5cf6;margin:12px 0 8px 0;">🟣 Investimentos (${fmtMoney(totInvBR, currBR)})</h4>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align:right">Valor</th></tr></thead>
+                            <tbody>${renderSubTable(invBR, currBR, '')}</tbody>
+                        </table>
+                    </div>
+                ` : ''}
             </div>
-        </div>
-    `;
-};
-
-    const renderSettings = () => {
-        return `
-            <div style="margin-bottom: 24px;">
-                <h2 style="color: var(--navy); margin: 0 0 4px 0;">Configurações</h2>
-                <p style="color: var(--text-light); margin: 0; font-size: 14px;">Integração com Google Drive e preferências do sistema</p>
-            </div>
-
-            <div class="card" style="padding: 28px; max-width: 700px;">
-                <h3 style="color: var(--navy); margin-top: 0; margin-bottom: 16px;">🌐 Google Apps Script (Drive / Excel)</h3>
-                <div class="form-group">
-                    <label class="form-label">URL do Web App (Google Apps Script)</label>
-                    <input type="url" id="setScriptUrl" class="input-field" value="${state.settings.googleScriptUrl || ''}" placeholder="https://script.google.com/macros/s/.../exec">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">Token de Segurança da API</label>
-                    <input type="text" id="setToken" class="input-field" value="${state.settings.apiToken || DEFAULT_TOKEN}">
-                </div>
-
-                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px; background: #f8fafc; padding: 12px 16px; border-radius: 8px;">
-                    <div id="connStatusDot" style="width: 12px; height: 12px; border-radius: 50%; background: #94a3b8;"></div>
-                    <span id="connStatusText" style="font-size: 13px; font-weight: 500;">Status da Conexão: Não testado</span>
-                    <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px; margin-left: auto;" onclick="App.checkConnection()">Testar Conexão</button>
-                </div>
-
-                <h3 style="color: var(--navy); margin-top: 24px; margin-bottom: 16px;">⚙️ Preferências</h3>
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 24px;">
-                    <div class="form-group">
-                        <label class="form-label">Moeda BR</label>
-                        <input type="text" id="setCurBR" class="input-field" value="${state.settings.currencyBR || 'R$'}">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Moeda ES</label>
-                        <input type="text" id="setCurES" class="input-field" value="${state.settings.currencyES || '€'}">
-                    </div>
-                    <div class="form-group">
-                        <label class="form-label">Dia Início Mês</label>
-                        <input type="number" id="setStartDay" class="input-field" value="${state.settings.monthStartDay || 1}" min="1" max="28">
-                    </div>
-                </div>
-
-                <div style="display: flex; gap: 12px; margin-bottom: 24px;">
-                    <button class="btn-primary" onclick="App.saveSettings()">Salvar Configurações</button>
-                    <button class="btn-secondary" onclick="App.syncFromDrive(false)">Sincronizar Agora</button>
-                </div>
-
-                ${renderUserManagement()}
-
-                <div style="margin-top: 30px; border-top: 2px solid var(--border); padding-top: 20px;">
-                    <h4 style="color: var(--danger); margin-bottom: 12px;">⚠️ Zona de Perigo</h4>
-                    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-                        <button class="btn-secondary" style="border-color: #cbd5e1;" onclick="App.cleanGhostData()">🧹 Limpar Fantasmas Locais</button>
-                        <button class="btn-secondary" style="border-color: #f59e0b; color: #d97706;" onclick="App.syncFromDriveForce()">📥 Forçar Cópia do Drive</button>
-                        <button class="btn-danger" onclick="App.resetDriveData()">🚨 Resetar Dados do Drive</button>
-                        <button class="btn-danger" style="background: #991b1b;" onclick="App.resetAllData()">💥 Reset Total</button>
-                    </div>
-                </div>
-            </div>
-        `;
+        </div>`;
     };
 
-    // ==================== GRÁFICOS (CHART.JS) ====================
-    let chartExpInstance = null;
-    let chartCompInstance = null;
-
-    const initCharts = () => {
-        const cExp = el('chartExpensesES');
-        const cComp = el('chartComparison');
-        if (!cExp || !cComp) return;
-
-        const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
-        const txs = state.transactions.filter(t => t.date && t.date.startsWith(selMonth));
-
-        const expES = txs.filter(t => t.country === 'ES' && t.type === 'expense');
-        const catMap = {};
-        expES.forEach(t => {
-            const cat = state.categories.find(c => c.id === t.categoryId);
-            const name = cat ? cat.name : 'Outros';
-            catMap[name] = (catMap[name] || 0) + t.amount;
-        });
-
-        if (chartExpInstance) chartExpInstance.destroy();
-        chartExpInstance = new Chart(cExp, {
-            type: 'doughnut',
-            data: {
-                labels: Object.keys(catMap),
-                datasets: [{
-                    data: Object.values(catMap),
-                    backgroundColor: ['#1e3a5f', '#059669', '#d97706', '#dc2626', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#64748b']
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
-        });
-
-        const incES = txs.filter(t => t.country === 'ES' && t.type === 'income').reduce((a, b) => a + b.amount, 0);
-        const totExpES = expES.reduce((a, b) => a + b.amount, 0);
-
-        if (chartCompInstance) chartCompInstance.destroy();
-        chartCompInstance = new Chart(cComp, {
-            type: 'bar',
-            data: {
-                labels: ['Receitas (€)', 'Despesas (€)'],
-                datasets: [{
-                    label: selMonth,
-                    data: [incES, totExpES],
-                    backgroundColor: ['#059669', '#dc2626'],
-                    borderRadius: 6
-                }]
-            },
-            options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
-        });
+    const changeReportMonth = (ym) => {
+        if (!ym) return;
+        state.selectedMonth = ym;
+        saveState();
+        const rc = el('reportContainer');
+        if (rc) rc.innerHTML = renderMonthlyReport();
+        const dp = el('dashMonthPicker');
+        if (dp) dp.value = ym;
     };
 
-    // ==================== MODAL DE LANÇAMENTOS ====================
+    // ==================== EXPORTAÇÃO EXCEL / CSV ====================
+    const exportToCSV = () => {
+        const ym = state.selectedMonth || new Date().toISOString().slice(0, 7);
+        const txs = (state.transactions || []).filter(t => t && t.date && getYearMonth(t.date) === ym)
+                                              .sort((a, b) => (b.date > a.date ? 1 : -1));
+
+        if (!txs.length) {
+            showToast('⚠️ Nenhum lançamento para exportar neste mês.', 'error');
+            return;
+        }
+
+        const [ano, mes] = ym.split('-');
+        const nomeMes = new Date(parseInt(ano), parseInt(mes) - 1, 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+
+        const recES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+        const expES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0);
+        const invES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'investment').reduce((s, t) => s + Number(t.amount || 0), 0);
+        const recBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'income').reduce((s, t) => s + Number(t.amount || 0), 0);
+        const expBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'expense').reduce((s, t) => s + Number(t.amount || 0), 0);
+        const invBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'investment').reduce((s, t) => s + Number(t.amount || 0), 0);
+
+        let csv = 'sep=;\n';
+        csv += `RELATÓRIO FINANCEIRO FAMILIAR - FINFAM;;;;;\n`;
+        csv += `Período:;${nomeMes.toUpperCase()};;;;\n`;
+        csv += `Total de Lançamentos:;${txs.length};;;;\n\n`;
+
+        csv += `--- RESUMO FINANCEIRO ---;;;;;\n`;
+        csv += `Espanha (EUR);Receitas:;€ ${recES.toFixed(2).replace('.', ',')};Despesas:;€ ${expES.toFixed(2).replace('.', ',')};Investimentos:;€ ${invES.toFixed(2).replace('.', ',')};Saldo:;€ ${(recES - expES - invES).toFixed(2).replace('.', ',')}\n`;
+        csv += `Brasil (BRL);Receitas:;R$ ${recBR.toFixed(2).replace('.', ',')};Despesas:;R$ ${expBR.toFixed(2).replace('.', ',')};Investimentos:;R$ ${invBR.toFixed(2).replace('.', ',')};Saldo:;R$ ${(recBR - expBR - invBR).toFixed(2).replace('.', ',')}\n\n`;
+
+        csv += `--- DETALHAMENTO DAS MOVIMENTAÇÕES ---;;;;;\n`;
+        csv += `Data;Tipo;País;Categoria;Descrição;Responsável;Moeda;Valor Numérico\n`;
+
+        txs.forEach(t => {
+            const cat = getCategoryById(t.categoryId).name;
+            const typeStr = (t.type || '').toLowerCase();
+            const tipo = typeStr === 'income' ? 'Receita' : typeStr === 'investment' ? 'Investimento' : 'Despesa';
+            const pais = (t.country || 'ES').toUpperCase();
+            const moeda = pais === 'BR' ? 'BRL' : 'EUR';
+            const numVal = Number(t.amount || 0);
+            const valForm = (typeStr === 'expense' ? -numVal : numVal).toFixed(2).replace('.', ',');
+            const desc = (t.description || '-').replace(/;/g, ',');
+            const resp = (t.assignedTo || 'Casal').replace(/;/g, ',');
+
+            csv += `${fmtDate(t.date)};${tipo};${pais};${cat};${desc};${resp};${moeda};${valForm}\n`;
+        });
+
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `FinFam_${ym}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+
+        showToast(`✅ Excel/CSV gerado com sucesso! (${txs.length} registros)`);
+    };
+
+    const exportToPDF = () => {
+        const rc = document.getElementById('reportContainer');
+        if (!rc) { showToast('❌ Relatório não disponível para impressão.', 'error'); return; }
+        showToast('🔄 Abrindo impressão do relatório...', 'info');
+        window.print();
+    };
+
+    // ==================== MODAL DE LANÇAMENTOS COM INVESTIMENTO FIXO ====================
+    const buildCategoryOptions = (type, selectedCatId) => {
+        if (type === 'investment') {
+            return `<option value="cat_investimentos" selected>📈 Investimentos & Aplicações</option>`;
+        }
+        const filtered = state.categories.filter(c => !c.type || c.type === type);
+        return filtered.map(c => {
+            const isSelected = selectedCatId && (c.id === selectedCatId || (c.aliases && c.aliases.includes(selectedCatId)));
+            return `<option value="${c.id}" ${isSelected ? 'selected' : ''}>${c.icon} ${c.name}</option>`;
+        }).join('');
+    };
+
+    const onTxTypeChange = (type) => {
+        const catSelect = el('txCategory');
+        if (!catSelect) return;
+        catSelect.innerHTML = buildCategoryOptions(type, null);
+    };
+
     const showTransactionModal = (txId = null) => {
         let tx = null;
         if (txId && typeof txId === 'string') {
             tx = state.transactions.find(t => t.id === txId);
         }
-        
+
         const isEdit = !!tx;
         const today = new Date().toISOString().slice(0, 10);
         const overlay = el('modalOverlay');
         if (!overlay) return;
 
-        const categoriesOptions = state.categories.map(c => 
-            `<option value="${c.id}" ${tx && tx.categoryId === c.id ? 'selected' : ''}>${c.icon} ${c.name} (${c.country})</option>`
-        ).join('');
+        const currentType = tx ? tx.type : 'expense';
 
-        const assignedCurrent = tx ? tx.assignedTo : 'Casal';
-        const userNames = (state.users || []).map(u => u.name);
-        const optionsList = ['Casal', ...userNames.filter(n => n !== 'Casal')];
-        if (assignedCurrent && !optionsList.includes(assignedCurrent)) {
-            optionsList.push(assignedCurrent);
-        }
-        const usersOptions = optionsList.map(name => 
-            `<option value="${name}" ${assignedCurrent === name ? 'selected' : ''}>${name === 'Casal' ? '💑 Casal' : '👤 ' + name}</option>`
-        ).join('');
+        const userNames = [...new Set((state.users || []).map(u => u.name).filter(Boolean))];
+        const assignedValue = tx ? (tx.assignedTo || 'Casal') : 'Casal';
+        const assignedOptions = [
+            `<option value="Casal" ${assignedValue === 'Casal' ? 'selected' : ''}>💑 Casal / Ambos</option>`,
+            ...userNames.map(name => `<option value="${name}" ${assignedValue === name ? 'selected' : ''}>👤 ${name}</option>`)
+        ].join('');
 
         el('modalContent').innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:1px solid #e2e8f0;padding-bottom:10px;">
@@ -1256,10 +797,10 @@ const App = (() => {
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                     <div class="form-group">
                         <label class="form-label">Tipo</label>
-                        <select id="txType" class="input-field">
-                            <option value="expense" ${tx && tx.type === 'expense' ? 'selected' : ''}>Despesa</option>
-                            <option value="income" ${tx && tx.type === 'income' ? 'selected' : ''}>Receita</option>
-                            <option value="investment" ${tx && tx.type === 'investment' ? 'selected' : ''}>Investimento 📈</option>
+                        <select id="txType" class="input-field" onchange="App.onTxTypeChange(this.value)">
+                            <option value="expense" ${currentType === 'expense' ? 'selected' : ''}>Despesa</option>
+                            <option value="income" ${currentType === 'income' ? 'selected' : ''}>Receita</option>
+                            <option value="investment" ${currentType === 'investment' ? 'selected' : ''}>Investimento 📈</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -1269,37 +810,40 @@ const App = (() => {
                 </div>
                 <div class="form-group">
                     <label class="form-label">Categoria</label>
-                    <select id="txCategory" class="input-field">${categoriesOptions}</select>
+                    <select id="txCategory" class="input-field">
+                        ${buildCategoryOptions(currentType, tx ? tx.categoryId : null)}
+                    </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Descrição</label>
-                    <input type="text" id="txDesc" class="input-field" placeholder="Ex: Supermercado / Salário" value="${tx ? tx.description : ''}">
+                    <input type="text" id="txDesc" class="input-field" placeholder="Ex: Supermercado, Aporte, etc." value="${tx ? (tx.description || '') : ''}">
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
                     <div class="form-group">
                         <label class="form-label">Responsável</label>
                         <select id="txAssigned" class="input-field">
-                            ${usersOptions}
+                            ${assignedOptions}
                         </select>
                     </div>
                     <div class="form-group">
-                        <label class="form-label">País</label>
+                        <label class="form-label">País / Moeda</label>
                         <select id="txCountry" class="input-field">
-                            <option value="ES" ${tx && tx.country === 'ES' ? 'selected' : ''}>🇪🇸 Espanha</option>
-                            <option value="BR" ${tx && tx.country === 'BR' ? 'selected' : ''}>🇧🇷 Brasil</option>
+                            <option value="ES" ${(!tx || tx.country === 'ES') ? 'selected' : ''}>🇪🇸 Espanha (€)</option>
+                            <option value="BR" ${(tx && tx.country === 'BR') ? 'selected' : ''}>🇧🇷 Brasil (R$)</option>
                         </select>
                     </div>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Valor</label>
-                    <input type="number" step="0.01" id="txAmount" class="input-field" placeholder="0.00" value="${tx ? tx.amount : ''}" style="font-size:18px;font-weight:bold;color:var(--navy);" required>
+                    <input type="number" step="0.01" min="0.01" id="txAmount" class="input-field" placeholder="0.00" value="${tx ? tx.amount : ''}" required>
                 </div>
-                <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:24px">
-                    <button type="button" class="btn-primary" style="background:#94a3b8;padding:12px 20px;" onclick="App.closeModal()">Cancelar</button>
-                    <button type="submit" class="btn-primary" style="padding:12px 24px;">${isEdit ? 'Salvar' : 'Adicionar'}</button>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:24px;">
+                    <button type="button" class="btn-secondary" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn-primary">${isEdit ? 'Salvar Alterações' : 'Confirmar Lançamento'}</button>
                 </div>
             </form>
         `;
+
         overlay.style.display = 'flex';
     };
 
@@ -1309,27 +853,28 @@ const App = (() => {
     };
 
     const saveTransaction = (id) => {
-        if (state.settings.googleScriptUrl && !isDriveConnected) {
+        if (!isDriveConnected && state.settings.googleScriptUrl) {
             showToast('⚠️ Aguarde a conexão com o Google Drive antes de salvar.', 'error');
             return;
         }
+
         const type = el('txType').value;
         const date = el('txDate').value;
-        const categoryId = el('txCategory').value;
+        const categoryId = (type === 'investment') ? 'cat_investimentos' : el('txCategory').value;
         const description = el('txDesc').value.trim();
         const assignedTo = el('txAssigned').value.trim() || 'Casal';
         const country = el('txCountry').value;
         const amount = parseFloat(el('txAmount').value) || 0;
 
         if (!date || !categoryId || amount <= 0) {
-            showToast('⚠️ Preencha todos os campos corretamente.', 'error');
+            showToast('⚠️ Preencha os campos obrigatórios corretamente.', 'error');
             return;
         }
 
         if (id) {
-            const index = state.transactions.findIndex(t => t.id === id);
-            if (index !== -1) {
-                state.transactions[index] = { id, date, type, categoryId, description, assignedTo, country, amount };
+            const idx = state.transactions.findIndex(t => t.id === id);
+            if (idx !== -1) {
+                state.transactions[idx] = { id, date, type, categoryId, description, assignedTo, country, amount };
             }
         } else {
             state.transactions.push({ id: generateId(), date, type, categoryId, description, assignedTo, country, amount });
@@ -1338,15 +883,16 @@ const App = (() => {
         saveState();
         closeModal();
         refreshAllViews();
-        showToast('✅ Lançamento salvo!');
+        showToast('✅ Lançamento gravado com sucesso!');
         syncToDrive();
     };
 
     const deleteTransaction = (id) => {
-        if (state.settings.googleScriptUrl && !isDriveConnected) {
+        if (!isDriveConnected && state.settings.googleScriptUrl) {
             showToast('⚠️ Aguarde a conexão com o Google Drive antes de excluir.', 'error');
             return;
         }
+
         if (confirm('⚠️ Deseja realmente excluir este lançamento?')) {
             state.transactions = state.transactions.filter(t => t.id !== id);
             saveState();
@@ -1356,128 +902,150 @@ const App = (() => {
         }
     };
 
-    // ==================== EXPORTAÇÕES ====================
-   const changeReportMonth = (ym) => {
-    if (!ym) return;
-    state.selectedMonth = ym;
-    saveState();
-    const reportContainer = el('reportContainer');
-    if (reportContainer) {
-        reportContainer.innerHTML = renderMonthlyReport();
-    }
-    const dashPicker = el('dashMonthPicker');
-    if (dashPicker) dashPicker.value = ym;
-};
+    // ==================== CONFIGURAÇÕES E USUÁRIOS ====================
+    const renderSettings = () => `
+        <div style="margin-bottom:24px">
+            <h2 style="margin:0;font-size:22px;color:var(--navy)">Configurações do Sistema</h2>
+            <p style="margin:4px 0 0;color:var(--text-light);font-size:14px">Conexão com Google Drive, moedas e perfis</p>
+        </div>
+        <div class="card" style="padding:24px;margin-bottom:24px">
+            <h3 style="margin:0 0 16px;color:var(--navy);font-size:16px">☁️ Conexão com Google Drive / Planilhas</h3>
+            <div class="form-group">
+                <label class="form-label">URL do Google Apps Script</label>
+                <input type="text" id="setGoogleUrl" class="input-field" value="${state.settings.googleScriptUrl || ''}" placeholder="https://script.google.com/macros/s/.../exec">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Token de Segurança</label>
+                <input type="text" id="setApiToken" class="input-field" value="${state.settings.apiToken || DEFAULT_TOKEN}">
+            </div>
+            <div style="display:flex;gap:10px;margin-top:16px;">
+                <button class="btn-primary" onclick="App.saveSettings()">Salvar Configurações</button>
+                <button class="btn-secondary" onclick="App.syncFromDrive(false)">🔄 Forçar Sincronização</button>
+            </div>
+        </div>
+        <div class="card" style="padding:24px">
+            <h3 style="margin:0 0 16px;color:var(--navy);font-size:16px">👥 Usuários Cadastrados</h3>
+            <ul style="list-style:none;padding:0;margin:0 0 20px 0">
+                ${(state.users || []).map(u => `
+                    <li style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">
+                        <span><strong>${u.name}</strong> (${u.role || 'Membro'})</span>
+                        ${state.users.length > 1 ? `<button onclick="App.deleteUser('${u.id}')" style="color:var(--danger);background:none;border:none;cursor:pointer;">Remover</button>` : ''}
+                    </li>
+                `).join('')}
+            </ul>
+            <div style="display:flex;gap:10px">
+                <input type="text" id="newUserName" class="input-field" placeholder="Nome do novo membro">
+                <button class="btn-primary" onclick="App.addUser()">Adicionar Membro</button>
+            </div>
+        </div>`;
 
-
-    const exportToPDF = () => {
-        const element = el('reportContainer');
-        if (!element) return;
-        const opt = {
-            margin: 10,
-            filename: `FinFam_Relatorio_${state.selectedMonth}.pdf`,
-            image: { type: 'jpeg', quality: 0.98 },
-            html2canvas: { scale: 2 },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-        };
-        html2pdf().set(opt).from(element).save();
+    const saveSettings = () => {
+        const url = el('setGoogleUrl').value.trim();
+        const token = el('setApiToken').value.trim();
+        state.settings.googleScriptUrl = url;
+        state.settings.apiToken = token || DEFAULT_TOKEN;
+        saveState();
+        showToast('Configurações salvas!');
+        syncFromDrive(false);
     };
 
-    // ==================== EXPORTAÇÃO EXCEL / CSV ORGANIZADO ====================
-const exportToCSV = () => {
-    const ym = state.selectedMonth || new Date().toISOString().slice(0, 7);
-
-    // Normalização segura da data para o mês selecionado
-    const getYearMonth = (dateStr) => {
-        if (!dateStr) return '';
-        const s = String(dateStr).trim();
-        if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 7);
-        const brMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-        if (brMatch) return `${brMatch[3]}-${brMatch[2].padStart(2, '0')}`;
-        try {
-            const d = new Date(s);
-            if (!isNaN(d.getTime())) return d.toISOString().slice(0, 7);
-        } catch (e) {}
-        return '';
+    const addUser = () => {
+        const inp = el('newUserName');
+        if (!inp || !inp.value.trim()) return;
+        const name = inp.value.trim();
+        state.users.push({ id: 'u_' + Date.now(), name, pin: '1234', role: 'Membro' });
+        inp.value = '';
+        saveState();
+        const setPage = el('settings');
+        if (setPage) setPage.innerHTML = renderSettings();
+        showToast(`Membro ${name} adicionado!`);
     };
 
-    const txs = (state.transactions || []).filter(t => {
-        if (!t || !t.date) return false;
-        return getYearMonth(t.date) === ym;
-    }).sort((a, b) => (b.date > a.date ? 1 : -1));
+    const deleteUser = (id) => {
+        if (confirm('Deseja remover este usuário?')) {
+            state.users = state.users.filter(u => u.id !== id);
+            saveState();
+            const setPage = el('settings');
+            if (setPage) setPage.innerHTML = renderSettings();
+            showToast('Usuário removido.');
+        }
+    };
 
-    if (!txs.length) { 
-        showToast('⚠️ Nenhum lançamento encontrado para exportar neste mês.', 'error'); 
-        return; 
-    }
+    // ==================== TELAS DE ACESSO ====================
+    const renderSetup = () => {
+        el('app').innerHTML = `
+            <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:20px;">
+                <div class="card" style="padding:32px;max-width:440px;width:100%;">
+                    <h2 style="color:var(--navy);margin-top:0">Bem-vindo ao FinFam</h2>
+                    <p style="color:var(--text-light);font-size:14px">Cadastre o primeiro usuário para iniciar.</p>
+                    <div class="form-group">
+                        <label class="form-label">Nome Completo</label>
+                        <input type="text" id="setupName" class="input-field" placeholder="Ex: João Silva">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">PIN de Acesso (4 dígitos)</label>
+                        <input type="password" maxlength="4" id="setupPin" class="input-field" placeholder="••••">
+                    </div>
+                    <button class="btn-primary" style="width:100%;margin-top:10px;" onclick="App.doSetup()">Começar a Usar</button>
+                </div>
+            </div>`;
+    };
 
-    const [ano, mes] = ym.split('-');
-    const nomeMes = new Date(parseInt(ano), parseInt(mes) - 1, 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+    const doSetup = () => {
+        const name = el('setupName').value.trim();
+        const pin = el('setupPin').value.trim();
+        if (!name || pin.length < 4) {
+            showToast('Informe seu nome e um PIN de 4 dígitos', 'error');
+            return;
+        }
+        const newUser = { id: 'u_' + Date.now(), name, pin, role: 'Administrador' };
+        state.users = [newUser];
+        saveState();
+        setSession(newUser.id);
+        renderApp();
+    };
 
-    // Cálculos de Totais
-    const recES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'income')
-                     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
-    const expES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'expense')
-                     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
-    const invES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'investment')
-                     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
-    const saldoES = recES - expES - invES;
+    const renderLogin = () => {
+        el('app').innerHTML = `
+            <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:20px;">
+                <div class="card" style="padding:32px;max-width:400px;width:100%;text-align:center;">
+                    <div style="font-size:40px;margin-bottom:10px;">💶</div>
+                    <h2 style="color:var(--navy);margin:0 0 8px 0;">FinFam</h2>
+                    <p style="color:var(--text-light);font-size:13px;margin:0 0 20px 0;">Controle Financeiro Familiar</p>
+                    <div class="form-group" style="text-align:left;">
+                        <label class="form-label">Selecione o Usuário</label>
+                        <select id="loginUser" class="input-field">
+                            ${state.users.map(u => `<option value="${u.id}">${u.name}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div class="form-group" style="text-align:left;">
+                        <label class="form-label">PIN de Acesso</label>
+                        <input type="password" maxlength="4" id="loginPin" class="input-field" placeholder="••••">
+                    </div>
+                    <button class="btn-primary" style="width:100%;margin-top:10px;" onclick="App.doLogin()">Entrar</button>
+                </div>
+            </div>`;
+    };
 
-    const recBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'income')
-                     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
-    const expBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'expense')
-                     .reduce((s, t) => s + (Number(t.amount) || 0), 0);
-    const saldoBR = recBR - expBR;
+    const doLogin = () => {
+        const uid = el('loginUser').value;
+        const pin = el('loginPin').value.trim();
+        const u = state.users.find(user => user.id === uid);
+        if (u && u.pin === pin) {
+            setSession(u.id);
+            renderApp();
+            syncFromDrive(false);
+        } else {
+            showToast('PIN incorreto.', 'error');
+        }
+    };
 
-    // Início da montagem do conteúdo (com instrução sep=; para o Excel)
-    let csv = 'sep=;\n';
+    const logout = () => {
+        clearSession();
+        renderLogin();
+    };
 
-    // 1. CABEÇALHO DO RELATÓRIO
-    csv += `RELATÓRIO FINANCEIRO FAMILIAR - FINFAM;;;;;\n`;
-    csv += `Período:;${nomeMes.toUpperCase()};;;;\n`;
-    csv += `Total de Lançamentos:;${txs.length};;;;\n\n`;
-
-    // 2. RESUMO EXECUTIVO (CONSOLIDADO)
-    csv += `--- RESUMO FINANCEIRO ---;;;;;\n`;
-    csv += `Espanha (EUR);Receitas:;€ ${recES.toFixed(2).replace('.', ',')};Despesas:;€ ${expES.toFixed(2).replace('.', ',')};Saldo:;€ ${saldoES.toFixed(2).replace('.', ',')}\n`;
-    csv += `Brasil (BRL);Receitas:;R$ ${recBR.toFixed(2).replace('.', ',')};Despesas:;R$ ${expBR.toFixed(2).replace('.', ',')};Saldo:;R$ ${saldoBR.toFixed(2).replace('.', ',')}\n\n`;
-
-    // 3. TABELA DE DETALHAMENTO
-    csv += `--- DETALHAMENTO DAS MOVIMENTAÇÕES ---;;;;;\n`;
-    csv += `Data;Tipo;País;Categoria;Descrição;Responsável;Moeda;Valor Numérico\n`;
-
-    txs.forEach(t => {
-        const cat = (state.categories || []).find(c => c.id === t.categoryId)?.name || 'Geral';
-        const typeStr = (t.type || '').toLowerCase();
-        const tipo = typeStr === 'income' ? 'Receita' : typeStr === 'investment' ? 'Investimento' : 'Despesa';
-        const pais = (t.country || 'ES').toUpperCase();
-        const moeda = pais === 'BR' ? 'BRL' : 'EUR';
-        
-        // Número com sinal correto e formatado com vírgula para fórmulas do Excel
-        const numValor = Number(t.amount || 0);
-        const valorFormatado = (typeStr === 'expense' ? -numValor : numValor).toFixed(2).replace('.', ',');
-        
-        // Tratamento de aspas e textos limpos
-        const desc = (t.description || '-').replace(/;/g, ',');
-        const resp = (t.assignedTo || 'Casal').replace(/;/g, ',');
-
-        csv += `${fmtDate(t.date)};${tipo};${pais};${cat};${desc};${resp};${moeda};${valorFormatado}\n`;
-    });
-
-    // Gera arquivo com BOM UTF-8 (mantém acentos como 'Salário', 'Mês', 'Espanha' intactos)
-    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `FinFam_Relatorio_${ym}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(link.href);
-
-    showToast(`✅ Arquivo Excel gerado com sucesso! (${txs.length} registros)`);
-};
-
-    // ==================== RENDER APP ====================
+    // ==================== APLICAÇÃO PRINCIPAL ====================
     const renderApp = () => {
         el('app').innerHTML = `
             <div class="sidebar">
@@ -1488,70 +1056,62 @@ const exportToCSV = () => {
                     </div>
                 </div>
                 <div style="flex:1;padding:12px 0">
-                    <button class="nav-item active" data-page="dashboard" onclick="App.nav(this)"><span>📊</span> Dashboard</button>
-                    <button class="nav-item" data-page="transactions" onclick="App.nav(this)"><span>📝</span> Lançamentos</button>
+                    <button class="nav-item active" data-page="dashboard" onclick="App.nav(this)"><span>📊</span> Visão Geral</button>
+                    <button class="nav-item" data-page="transactions" onclick="App.nav(this)"><span>📋</span> Lançamentos</button>
                     <button class="nav-item" data-page="reports" onclick="App.nav(this)"><span>📈</span> Relatórios</button>
                     <button class="nav-item" data-page="settings" onclick="App.nav(this)"><span>⚙️</span> Configurações</button>
                 </div>
                 <div style="padding:16px;border-top:1px solid rgba(255,255,255,.1)">
-                    <div style="display:flex;align-items:center;gap:10px">
-                        <div class="user-avatar">${state.currentUser?.name?.charAt(0).toUpperCase() || 'U'}</div>
+                    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                        <div class="user-avatar">${(state.currentUser?.name || 'U').charAt(0)}</div>
                         <div style="flex:1;min-width:0">
-                            <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${state.currentUser?.name || ''}</div>
-                            <button onclick="App.togglePrivacy()" style="background:none;border:none;color:rgba(255,255,255,.8);cursor:pointer;font-size:12px;padding:0">${state.privacyMode ? '👁️ Mostrar' : '🙈 Ocultar'}</button>
+                            <div style="font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${state.currentUser?.name || 'Usuário'}</div>
+                            <div style="font-size:11px;opacity:.7">${state.currentUser?.role || 'Membro'}</div>
                         </div>
-                        <button onclick="App.logout()" style="background:none;border:none;color:rgba(255,255,255,.7);cursor:pointer;font-size:18px" title="Sair">🚪</button>
+                    </div>
+                    <div style="display:flex;gap:6px">
+                        <button class="btn-secondary" onclick="App.togglePrivacy()" style="flex:1;padding:6px;font-size:12px;" title="Modo Privacidade">👁️</button>
+                        <button class="btn-secondary" onclick="App.logout()" style="flex:1;padding:6px;font-size:12px;color:var(--danger)">Sair</button>
                     </div>
                 </div>
             </div>
+
             <div class="main-content">
                 <div id="dashboard" class="page active">${renderDashboard()}</div>
                 <div id="transactions" class="page">${renderTransactions()}</div>
                 <div id="reports" class="page">${renderMonthlyReport()}</div>
                 <div id="settings" class="page">${renderSettings()}</div>
             </div>
-            
-            <div id="modalOverlay" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
-                <div id="modalContent" class="modal" style="background:#fff; padding:24px; border-radius:12px; width:90%; max-width:550px; max-height:90vh; overflow-y:auto; box-shadow:0 10px 25px rgba(0,0,0,0.2);"></div>
+
+            <div id="modalOverlay" class="modal-overlay" style="display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.6);z-index:9999;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+                <div id="modalContent" class="modal" style="background:#fff;padding:24px;border-radius:12px;width:90%;max-width:550px;max-height:90vh;overflow-y:auto;box-shadow:0 10px 25px rgba(0,0,0,0.2);"></div>
             </div>
             <div id="toast" class="toast"></div>`;
     };
 
-    // ==================== INIT ====================
+    // ==================== INICIALIZAÇÃO ====================
     const init = () => {
         initState();
         if (!isSetup()) renderSetup();
         else if (!isLoggedIn()) renderLogin();
         else {
             renderApp();
-            showLoading("Conectando ao Google Drive...");
-            syncFromDrive(true).then(() => {
-                console.log('✅ Sincronização automática concluída');
-                console.log('📊 Total de transações:', state.transactions.length);
-            }).catch(err => {
-                console.warn('⚠️ Sincronização automática falhou:', err);
-            });
+            syncFromDrive(false);
         }
     };
 
-    // EXPORTAR API PÚBLICA
     return {
         init,
+        nav,
         doSetup,
         doLogin,
         logout,
-        nav,
         togglePrivacy,
         changeSelectedMonth,
-        checkConnection,
         saveSettings,
         syncFromDrive,
-        syncFromDriveForce,
-        syncToDrive,
-        resetAllData,
-        cleanGhostData,
-        resetDriveData,
         showTransactionModal,
+        onTxTypeChange,
         closeModal,
         saveTransaction,
         deleteTransaction,
