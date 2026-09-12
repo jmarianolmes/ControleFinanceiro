@@ -1062,97 +1062,149 @@ const App = (() => {
 
     // -------- PDF --------
     const exportToPDF = () => {
-        if (typeof html2pdf === 'undefined') { showToast('Biblioteca PDF não carregada.', 'error'); return; }
+    if (typeof html2pdf === 'undefined') {
+        showToast('Biblioteca PDF não carregada.', 'error');
+        return;
+    }
 
-        const selMonth = state.selectedMonth || new Date().toISOString().slice(0,7);
-        const txs = state.transactions
-            .filter(t => t && t.date && getYearMonth(t.date) === selMonth)
-            .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
+    const selMonth = state.selectedMonth || new Date().toISOString().slice(0,7);
+    const txs = state.transactions
+        .filter(t => t && t.date && getYearMonth(t.date) === selMonth)
+        .filter(afetaMes)
+        .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
 
-        if (txs.length === 0) { showToast('Nenhum dado para exportar neste mês.', 'info'); return; }
+    showToast('📄 Gerando PDF...', 'info');
 
-        showToast('📄 Gerando PDF...', 'info');
+    // ---------- helpers ----------
+    const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
+    const filterBy = (country, pred) => txs.filter(t => t.country === country && pred(t));
+    const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const money = (v, cur) => cur + ' ' + Number(v||0).toFixed(2).replace('.', ',');
 
-        const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
-        const filterBy = (country, pred) => txs.filter(t => t.country === country && pred(t));
-        const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        const money = (v, cur) => cur + ' ' + Number(v||0).toFixed(2).replace('.', ',');
+    const buildTable = (items, cur, prefix) => {
+        if (items.length === 0) {
+            return '<p style="color:#64748b;font-size:11px;padding:8px;background:#f8fafc;border-radius:4px;margin:0 0 10px;">Sem registros.</p>';
+        }
+        let rows = '';
+        items.forEach(t => {
+            const cat = getCategoryDisplay(t.categoryId);
+            rows += '<tr>' +
+                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + fmtDate(t.date) + '</td>' +
+                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.description) + '</td>' +
+                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(cat.name) + '</td>' +
+                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.assignedTo || 'Casal') + '</td>' +
+                '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;">' + prefix + money(t.amount, cur) + '</td>' +
+            '</tr>';
+        });
+        return '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;">' +
+            '<thead><tr style="background:#f1f5f9;">' +
+                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:70px;">Data</th>' +
+                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Descrição</th>' +
+                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Categoria</th>' +
+                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:100px;">Responsável</th>' +
+                '<th style="padding:6px 8px;text-align:right;border:1px solid #cbd5e1;width:100px;">Valor</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table>';
+    };
 
-        const buildTable = (items, cur, prefix) => {
-            if (items.length === 0) {
-                return '<p style="color:#64748b;font-size:11px;padding:8px;background:#f8fafc;border-radius:4px;">Nenhum registro no mês.</p>';
-            }
-            return '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;">' +
-                '<thead><tr style="background:#f1f5f9;">' +
-                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:70px;">Data</th>' +
-                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Descrição</th>' +
-                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Categoria</th>' +
-                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:100px;">Responsável</th>' +
-                    '<th style="padding:6px 8px;text-align:right;border:1px solid #cbd5e1;width:100px;">Valor</th>' +
-                '</tr></thead><tbody>' +
-                items.map(t => {
-                    const cat = getCategoryDisplay(t.categoryId);
-                    return '<tr>' +
-                        '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + fmtDate(t.date) + '</td>' +
-                        '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.description) + '</td>' +
-                        '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(cat.name) + '</td>' +
-                        '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.assignedTo || 'Casal') + '</td>' +
-                        '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;">' + prefix + money(t.amount, cur) + '</td>' +
-                    '</tr>';
-                }).join('') + '</tbody></table>';
-        };
-
-        const block = (country, label, cur) => {
-            const exp = filterBy(country, t => t.type === 'expense');
-            const inc = filterBy(country, t => t.type === 'income');
-            const apo = filterBy(country, isAporte);
-            const res = filterBy(country, isResgate);
-            return '<div style="margin-bottom:20px;">' +
-                '<h3 style="color:#1e3a5f;font-size:13px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">' + label + '</h3>' +
-                '<p style="font-size:11px;font-weight:600;color:#dc2626;margin:8px 0 4px;">Despesas (' + money(sum(exp), cur) + ')</p>' + buildTable(exp, cur, '-') +
-                '<p style="font-size:11px;font-weight:600;color:#059669;margin:8px 0 4px;">Receitas (' + money(sum(inc), cur) + ')</p>' + buildTable(inc, cur, '+') +
-                '<p style="font-size:11px;font-weight:600;color:#8b5cf6;margin:8px 0 4px;">Aportes (' + money(sum(apo), cur) + ')</p>' + buildTable(apo, cur, '-') +
-                '<p style="font-size:11px;font-weight:600;color:#d97706;margin:8px 0 4px;">Resgates (' + money(sum(res), cur) + ')</p>' + buildTable(res, cur, '+') +
-            '</div>';
-        };
-
-        const totalES = calcMonth(txs.filter(t => t.country === 'ES'));
-        const totalBR = calcMonth(txs.filter(t => t.country === 'BR'));
-
-        const html = '<div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;padding:10px;background:#fff;">' +
-            '<h1 style="color:#1e3a5f;font-size:18px;margin:0 0 4px;">FinFam — Relatório Mensal</h1>' +
-            '<p style="font-size:11px;color:#64748b;margin:0 0 4px;">Mês: <strong>' + selMonth + '</strong> • Gerado em: ' + new Date().toLocaleString('pt-BR') + '</p>' +
-            '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:12px 0;">' +
-                '<p style="font-size:11px;margin:0 0 6px;font-weight:600;color:#1e3a5f;">Resumo Consolidado</p>' +
-                '<p style="font-size:10px;margin:2px 0;">🇪🇸 <strong>Espanha:</strong> Receitas ' + money(totalES.income,'€') + ' • Despesas ' + money(totalES.expense,'€') + ' • Aportes ' + money(totalES.aportes,'€') + ' • Resgates ' + money(totalES.resgates,'€') + ' • Saldo <strong>' + money(totalES.balance,'€') + '</strong></p>' +
-                '<p style="font-size:10px;margin:2px 0;">🇧🇷 <strong>Brasil:</strong> Receitas ' + money(totalBR.income,'R$') + ' • Despesas ' + money(totalBR.expense,'R$') + ' • Aportes ' + money(totalBR.aportes,'R$') + ' • Resgates ' + money(totalBR.resgates,'R$') + ' • Saldo <strong>' + money(totalBR.balance,'R$') + '</strong></p>' +
-            '</div>' +
-            block('ES', '🇪🇸 Espanha', '€') +
-            block('BR', '🇧🇷 Brasil', 'R$') +
+    const block = (country, label, cur) => {
+        const exp = filterBy(country, t => t.type === 'expense');
+        const inc = filterBy(country, t => t.type === 'income');
+        const apo = filterBy(country, isAporte);
+        const res = filterBy(country, isResgate);
+        return '<div style="margin-bottom:20px;">' +
+            '<h3 style="color:#1e3a5f;font-size:13px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">' + label + '</h3>' +
+            '<p style="font-size:11px;font-weight:600;color:#dc2626;margin:8px 0 4px;">Despesas (' + money(sum(exp), cur) + ')</p>' + buildTable(exp, cur, '-') +
+            '<p style="font-size:11px;font-weight:600;color:#059669;margin:8px 0 4px;">Receitas (' + money(sum(inc), cur) + ')</p>' + buildTable(inc, cur, '+') +
+            '<p style="font-size:11px;font-weight:600;color:#8b5cf6;margin:8px 0 4px;">Aportes (' + money(sum(apo), cur) + ')</p>' + buildTable(apo, cur, '-') +
+            '<p style="font-size:11px;font-weight:600;color:#d97706;margin:8px 0 4px;">Resgates (' + money(sum(res), cur) + ')</p>' + buildTable(res, cur, '+') +
         '</div>';
+    };
 
-        const wrapper = document.createElement('div');
-        wrapper.id = 'pdfTempWrapper';
-        wrapper.style.cssText = 'position:fixed;top:0;left:0;width:900px;background:#fff;z-index:999999;padding:20px;';
-        wrapper.innerHTML = html;
-        document.body.appendChild(wrapper);
+    const totalES = calcMonth(txs.filter(t => t.country === 'ES'));
+    const totalBR = calcMonth(txs.filter(t => t.country === 'BR'));
 
+    const htmlContent =
+        '<h1 style="color:#1e3a5f;font-size:18px;margin:0 0 4px;">FinFam — Relatório Mensal</h1>' +
+        '<p style="font-size:11px;color:#64748b;margin:0 0 12px;">Mês: <strong>' + selMonth + '</strong> • Gerado em: ' + new Date().toLocaleString('pt-BR') + '</p>' +
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:0 0 16px;">' +
+            '<p style="font-size:11px;margin:0 0 6px;font-weight:600;color:#1e3a5f;">Resumo Consolidado</p>' +
+            '<p style="font-size:10px;margin:2px 0;">🇪🇸 <strong>Espanha:</strong> Receitas ' + money(totalES.income,'€') + ' • Despesas ' + money(totalES.expense,'€') + ' • Aportes ' + money(totalES.aportes,'€') + ' • Resgates ' + money(totalES.resgates,'€') + ' • Saldo <strong>' + money(totalES.balance,'€') + '</strong></p>' +
+            '<p style="font-size:10px;margin:2px 0;">🇧🇷 <strong>Brasil:</strong> Receitas ' + money(totalBR.income,'R$') + ' • Despesas ' + money(totalBR.expense,'R$') + ' • Aportes ' + money(totalBR.aportes,'R$') + ' • Resgates ' + money(totalBR.resgates,'R$') + ' • Saldo <strong>' + money(totalBR.balance,'R$') + '</strong></p>' +
+        '</div>' +
+        block('ES', '🇪🇸 Espanha', '€') +
+        block('BR', '🇧🇷 Brasil', 'R$');
+
+    // ============================================================
+    // ABORDAGEM DEFINITIVA — wrapper VISÍVEL, captura síncrona
+    // ============================================================
+    // 1) Overlay escuro atrás (esconde a "piscada")
+    const overlay = document.createElement('div');
+    overlay.id = 'pdfGeneratingOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.85);z-index:999998;display:flex;align-items:center;justify-content:center;color:#fff;font-family:Inter,sans-serif;font-size:16px;font-weight:600;';
+    overlay.innerHTML = '<div>📄 Gerando PDF...</div>';
+    document.body.appendChild(overlay);
+
+    // 2) Wrapper VISÍVEL, acima do overlay, no canto superior esquerdo
+    const wrapper = document.createElement('div');
+    wrapper.id = 'pdfRenderTarget';
+    wrapper.style.cssText =
+        'position:fixed;top:0;left:0;' +
+        'width:900px;' +
+        'background:#ffffff;' +
+        'padding:24px;' +
+        'z-index:999999;' +
+        'font-family:Arial,Helvetica,sans-serif;' +
+        'color:#1e293b;' +
+        'box-shadow:0 20px 60px rgba(0,0,0,.3);';
+    wrapper.innerHTML = htmlContent;
+    document.body.appendChild(wrapper);
+
+    // 3) Espera pintura REAL — 3 frames + setTimeout longo
+    const afterPaint = (cb) => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => {
+                    setTimeout(cb, 400);
+                });
+            });
+        });
+    };
+
+    afterPaint(() => {
         const opt = {
             margin: [8, 8, 8, 8],
             filename: 'FinFam_Relatorio_' + selMonth + '.pdf',
             image: { type: 'jpeg', quality: 0.95 },
-            html2canvas: { scale: 2, useCORS: true, logging: false, backgroundColor: '#ffffff', windowWidth: 900, scrollX: 0, scrollY: 0 },
+            html2canvas: {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                backgroundColor: '#ffffff',
+                windowWidth: 900,
+                width: 900,
+                scrollX: 0,
+                scrollY: 0,
+                allowTaint: true,
+                foreignObjectRendering: false
+            },
             jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
             pagebreak: { mode: ['css', 'legacy'] }
         };
 
-        setTimeout(() => {
-            html2pdf().set(opt).from(wrapper).save()
-                .then(() => { wrapper.remove(); showToast('✅ PDF gerado com sucesso!', 'success'); })
-                .catch(err => { console.error('exportToPDF:', err); wrapper.remove(); showToast('Erro ao exportar PDF.', 'error'); });
-        }, 250);
-    };
-
+        html2pdf().set(opt).from(wrapper).save()
+            .then(() => {
+                wrapper.remove();
+                overlay.remove();
+                showToast('✅ PDF gerado com sucesso!', 'success');
+            })
+            .catch(err => {
+                console.error('exportToPDF:', err);
+                wrapper.remove();
+                overlay.remove();
+                showToast('Erro ao exportar PDF: ' + (err && err.message ? err.message : ''), 'error');
+            });
+    });
+};
     // -------- CSV --------
     const exportToCSV = () => {
         const ym = state.selectedMonth || new Date().toISOString().slice(0,7);
