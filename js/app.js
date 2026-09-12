@@ -945,7 +945,6 @@ const App = (() => {
  const renderMonthlyReport = () => {
     const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
 
-    // Converte qualquer data com precisão para 'AAAA-MM'
     const getYearMonth = (dateStr) => {
         if (!dateStr) return '';
         const s = String(dateStr).trim();
@@ -959,31 +958,64 @@ const App = (() => {
         return '';
     };
 
-    // Pega todos os registros pertencentes ao mês selecionado
+    // Todos os lançamentos do mês
     const txs = (state.transactions || []).filter(t => {
         if (!t || !t.date) return false;
         return getYearMonth(t.date) === selMonth;
     }).sort((a, b) => (b.date > a.date ? 1 : -1));
 
-    // Separação por tipo
-    const incomes = txs.filter(t => (t.type || '').toLowerCase() === 'income');
-    const expenses = txs.filter(t => (t.type || '').toLowerCase() === 'expense');
-    const investments = txs.filter(t => (t.type || '').toLowerCase() === 'investment');
+    // Filtros Espanha
+    const recES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'income');
+    const expES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'expense');
+    const invES = txs.filter(t => (t.country || 'ES').toUpperCase() === 'ES' && (t.type || '').toLowerCase() === 'investment');
 
-    const totalIncome = incomes.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const totalExpense = expenses.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const totalInvestment = investments.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
-    const saldoMes = totalIncome - totalExpense - totalInvestment;
+    // Filtros Brasil
+    const recBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'income');
+    const expBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'expense');
+    const invBR = txs.filter(t => (t.country || '').toUpperCase() === 'BR' && (t.type || '').toLowerCase() === 'investment');
 
-    const [ano, mes] = selMonth.split('-');
-    const nomeMes = new Date(parseInt(ano), parseInt(mes) - 1, 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+    // Totais Espanha
+    const totalRecES = recES.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const totalExpES = expES.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const totalInvES = invES.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const saldoES = totalRecES - totalExpES - totalInvES;
+
+    // Totais Brasil
+    const totalRecBR = recBR.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const totalExpBR = expBR.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const totalInvBR = invBR.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const saldoBR = totalRecBR - totalExpBR - totalInvBR;
+
+    const currES = state.settings?.currencyES || '€';
+    const currBR = state.settings?.currencyBR || 'R$';
+
+    // Gerador de tabela para evitar repetição de código
+    const renderTable = (lista, moeda, corValor = '') => {
+        if (!lista.length) {
+            return `<tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:14px;">Nenhum registro.</td></tr>`;
+        }
+        return lista.map(t => {
+            const cat = (state.categories || []).find(c => c.id === t.categoryId);
+            return `
+                <tr>
+                    <td>${fmtDate(t.date)}</td>
+                    <td><strong>${t.description || '-'}</strong></td>
+                    <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
+                    <td>${t.assignedTo || 'Casal'}</td>
+                    <td style="text-align: right; font-weight: 600;" class="${corValor}">
+                        ${fmtMoney(t.amount, moeda)}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    };
 
     return `
         <div id="reportContainer">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
                 <div>
-                    <h2 style="color: var(--navy); margin: 0 0 4px 0;">Relatório de ${nomeMes}</h2>
-                    <p style="color: var(--text-light); margin: 0; font-size: 14px;">Total de ${txs.length} movimentação(ões) encontrada(s)</p>
+                    <h2 style="color: var(--navy); margin: 0 0 4px 0;">Relatório Mensal</h2>
+                    <p style="color: var(--text-light); margin: 0; font-size: 14px;">Detalhamento financeiro (${txs.length} lançamentos no mês)</p>
                 </div>
                 <div style="display: flex; gap: 12px; align-items: center;">
                     <input type="month" id="reportMonthPicker" class="input-field" value="${selMonth}" onchange="App.changeReportMonth(this.value)" style="width: auto;">
@@ -992,68 +1024,84 @@ const App = (() => {
                 </div>
             </div>
 
-            <!-- CARDS DE TOTAIS DO MÊS -->
-            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px;">
-                <div class="card stat-card">
-                    <div class="stat-label">Receitas</div>
-                    <div class="stat-value emerald-text">+${fmtMoney(totalIncome, state.settings?.currencyES || '€')}</div>
+            <!-- SEÇÃO ESPANHA 🇪🇸 -->
+            <div class="card" style="padding: 24px; margin-bottom: 24px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 2px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; flex-wrap:wrap; gap:8px;">
+                    <h3 style="color: var(--navy); margin: 0;">🇪🇸 Espanha</h3>
+                    <div style="font-size: 14px; font-weight: 600;">
+                        <span class="emerald-text">Rec: +${fmtMoney(totalRecES, currES)}</span> | 
+                        <span class="danger-text">Desp: -${fmtMoney(totalExpES, currES)}</span> | 
+                        <span style="color:#8b5cf6">Inv: ${fmtMoney(totalInvES, currES)}</span> | 
+                        <span>Saldo: <strong>${fmtMoney(saldoES, currES)}</strong></span>
+                    </div>
                 </div>
-                <div class="card stat-card">
-                    <div class="stat-label">Despesas</div>
-                    <div class="stat-value danger-text">-${fmtMoney(totalExpense, state.settings?.currencyES || '€')}</div>
+
+                <!-- Receitas ES -->
+                <h4 style="color: var(--emerald); margin: 12px 0 8px 0;">🟢 Receitas (+${fmtMoney(totalRecES, currES)})</h4>
+                <div class="table-container" style="margin-bottom: 20px;">
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
+                        </thead>
+                        <tbody>${renderTable(recES, currES, 'emerald-text')}</tbody>
+                    </table>
                 </div>
-                <div class="card stat-card">
-                    <div class="stat-label">Investimentos</div>
-                    <div class="stat-value" style="color: #8b5cf6;">${fmtMoney(totalInvestment, state.settings?.currencyES || '€')}</div>
+
+                <!-- Despesas ES -->
+                <h4 style="color: var(--danger); margin: 12px 0 8px 0;">🔴 Despesas (-${fmtMoney(totalExpES, currES)})</h4>
+                <div class="table-container" style="margin-bottom: 20px;">
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
+                        </thead>
+                        <tbody>${renderTable(expES, currES, 'danger-text')}</tbody>
+                    </table>
                 </div>
-                <div class="card stat-card">
-                    <div class="stat-label">Saldo do Mês</div>
-                    <div class="stat-value ${saldoMes >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(saldoMes, state.settings?.currencyES || '€')}</div>
-                </div>
+
+                <!-- Investimentos ES -->
+                ${invES.length > 0 ? `
+                    <h4 style="color: #8b5cf6; margin: 12px 0 8px 0;">🟣 Investimentos (${fmtMoney(totalInvES, currES)})</h4>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
+                            </thead>
+                            <tbody>${renderTable(invES, currES, '')}</tbody>
+                        </table>
+                    </div>
+                ` : ''}
             </div>
 
-            <!-- TABELA COM TODAS AS TRANSAÇÕES DO MÊS -->
+            <!-- SEÇÃO BRASIL 🇧🇷 -->
             <div class="card" style="padding: 24px;">
-                <h3 style="color: var(--navy); margin-top: 0; margin-bottom: 16px;">📋 Todas as Transações do Período</h3>
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom: 2px solid var(--border); padding-bottom: 12px; margin-bottom: 16px; flex-wrap:wrap; gap:8px;">
+                    <h3 style="color: var(--navy); margin: 0;">🇧🇷 Brasil</h3>
+                    <div style="font-size: 14px; font-weight: 600;">
+                        <span class="emerald-text">Rec: +${fmtMoney(totalRecBR, currBR)}</span> | 
+                        <span class="danger-text">Desp: -${fmtMoney(totalExpBR, currBR)}</span> | 
+                        <span>Saldo: <strong>${fmtMoney(saldoBR, currBR)}</strong></span>
+                    </div>
+                </div>
+
+                <!-- Receitas BR -->
+                <h4 style="color: var(--emerald); margin: 12px 0 8px 0;">🟢 Receitas (+${fmtMoney(totalRecBR, currBR)})</h4>
+                <div class="table-container" style="margin-bottom: 20px;">
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
+                        </thead>
+                        <tbody>${renderTable(recBR, currBR, 'emerald-text')}</tbody>
+                    </table>
+                </div>
+
+                <!-- Despesas BR -->
+                <h4 style="color: var(--danger); margin: 12px 0 8px 0;">🔴 Despesas (-${fmtMoney(totalExpBR, currBR)})</h4>
                 <div class="table-container">
                     <table class="data-table">
                         <thead>
-                            <tr>
-                                <th>Data</th>
-                                <th>Tipo</th>
-                                <th>Descrição</th>
-                                <th>Categoria</th>
-                                <th>Responsável</th>
-                                <th>País</th>
-                                <th style="text-align: right;">Valor</th>
-                            </tr>
+                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
                         </thead>
-                        <tbody>
-                            ${txs.length === 0 ? `
-                                <tr><td colspan="7" style="text-align:center;color:var(--text-light);padding:24px;">Nenhum lançamento encontrado para ${selMonth}.</td></tr>
-                            ` : txs.map(t => {
-                                const cat = (state.categories || []).find(c => c.id === t.categoryId);
-                                const isInc = (t.type || '').toLowerCase() === 'income';
-                                const isInv = (t.type || '').toLowerCase() === 'investment';
-                                const badgeClass = isInc ? 'badge-success' : isInv ? 'badge-purple' : 'badge-danger';
-                                const typeLabel = isInc ? 'Receita' : isInv ? 'Investimento' : 'Despesa';
-                                const sign = isInc ? '+' : isInv ? '' : '-';
-
-                                return `
-                                    <tr>
-                                        <td>${fmtDate(t.date)}</td>
-                                        <td><span class="badge ${badgeClass}">${typeLabel}</span></td>
-                                        <td><strong>${t.description || '-'}</strong></td>
-                                        <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
-                                        <td>${t.assignedTo || 'Casal'}</td>
-                                        <td>${t.country || 'ES'}</td>
-                                        <td style="text-align: right; font-weight: 600;" class="${isInc ? 'emerald-text' : isInv ? '' : 'danger-text'}">
-                                            ${sign}${fmtMoney(t.amount, state.settings?.currencyES || '€')}
-                                        </td>
-                                    </tr>
-                                `;
-                            }).join('')}
-                        </tbody>
+                        <tbody>${renderTable(expBR, currBR, 'danger-text')}</tbody>
                     </table>
                 </div>
             </div>
