@@ -1072,94 +1072,116 @@ const App = (() => {
     // PDF — IFRAME ISOLADO
     // ============================================================
     const exportToPDF = () => {
-        if (typeof html2pdf === 'undefined') {
-            showToast('Biblioteca PDF não carregada.', 'error');
-            return;
+    if (typeof html2pdf === 'undefined') {
+        showToast('Biblioteca PDF não carregada.', 'error');
+        return;
+    }
+
+    const selMonth = state.selectedMonth || new Date().toISOString().slice(0,7);
+    const txs = state.transactions
+        .filter(t => t && t.date && getYearMonth(t.date) === selMonth)
+        .filter(afetaMes)
+        .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
+
+    showToast('📄 Gerando PDF...', 'info');
+
+    const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
+    const filterBy = (country, pred) => txs.filter(t => t.country === country && pred(t));
+    const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const money = (v, cur) => cur + ' ' + Number(v||0).toFixed(2).replace('.', ',');
+
+    const buildTable = (items, cur, prefix) => {
+        if (items.length === 0) {
+            return '<p style="color:#64748b;font-size:11px;padding:8px;background:#f8fafc;border-radius:4px;margin:0 0 10px;">Sem registros.</p>';
         }
+        let rows = '';
+        items.forEach(t => {
+            const cat = getCategoryDisplay(t.categoryId);
+            rows += '<tr>' +
+                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + fmtDate(t.date) + '</td>' +
+                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.description) + '</td>' +
+                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(cat.name) + '</td>' +
+                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.assignedTo || 'Casal') + '</td>' +
+                '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;">' + prefix + money(t.amount, cur) + '</td>' +
+            '</tr>';
+        });
+        return '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;">' +
+            '<thead><tr style="background:#f1f5f9;">' +
+                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:70px;">Data</th>' +
+                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Descrição</th>' +
+                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Categoria</th>' +
+                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:100px;">Responsável</th>' +
+                '<th style="padding:6px 8px;text-align:right;border:1px solid #cbd5e1;width:100px;">Valor</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table>';
+    };
 
-        const selMonth = state.selectedMonth || new Date().toISOString().slice(0,7);
-        const txs = state.transactions
-            .filter(t => t && t.date && getYearMonth(t.date) === selMonth)
-            .filter(afetaMes)
-            .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
+    const block = (country, label, cur) => {
+        const exp = filterBy(country, t => t.type === 'expense');
+        const inc = filterBy(country, t => t.type === 'income');
+        const apo = filterBy(country, isAporte);
+        const res = filterBy(country, isResgate);
+        return '<div style="margin-bottom:20px;">' +
+            '<h3 style="color:#1e3a5f;font-size:13px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">' + label + '</h3>' +
+            '<p style="font-size:11px;font-weight:600;color:#dc2626;margin:8px 0 4px;">Despesas (' + money(sum(exp), cur) + ')</p>' + buildTable(exp, cur, '-') +
+            '<p style="font-size:11px;font-weight:600;color:#059669;margin:8px 0 4px;">Receitas (' + money(sum(inc), cur) + ')</p>' + buildTable(inc, cur, '+') +
+            '<p style="font-size:11px;font-weight:600;color:#8b5cf6;margin:8px 0 4px;">Aportes (' + money(sum(apo), cur) + ')</p>' + buildTable(apo, cur, '-') +
+            '<p style="font-size:11px;font-weight:600;color:#d97706;margin:8px 0 4px;">Resgates (' + money(sum(res), cur) + ')</p>' + buildTable(res, cur, '+') +
+        '</div>';
+    };
 
-        showToast('📄 Gerando PDF...', 'info');
+    const totalES = calcMonth(txs.filter(t => t.country === 'ES'));
+    const totalBR = calcMonth(txs.filter(t => t.country === 'BR'));
 
-        const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
-        const filterBy = (country, pred) => txs.filter(t => t.country === country && pred(t));
-        const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        const money = (v, cur) => cur + ' ' + Number(v||0).toFixed(2).replace('.', ',');
+    const htmlContent =
+        '<div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;background:#fff;padding:20px;">' +
+        '<h1 style="color:#1e3a5f;font-size:18px;margin:0 0 4px;">FinFam — Relatório Mensal</h1>' +
+        '<p style="font-size:11px;color:#64748b;margin:0 0 12px;">Mês: <strong>' + selMonth + '</strong> • Gerado em: ' + new Date().toLocaleString('pt-BR') + '</p>' +
+        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:0 0 16px;">' +
+            '<p style="font-size:11px;margin:0 0 6px;font-weight:600;color:#1e3a5f;">Resumo Consolidado</p>' +
+            '<p style="font-size:10px;margin:2px 0;">🇪🇸 <strong>Espanha:</strong> Receitas ' + money(totalES.income,'€') + ' • Despesas ' + money(totalES.expense,'€') + ' • Aportes ' + money(totalES.aportes,'€') + ' • Resgates ' + money(totalES.resgates,'€') + ' • Saldo <strong>' + money(totalES.balance,'€') + '</strong></p>' +
+            '<p style="font-size:10px;margin:2px 0;">🇧🇷 <strong>Brasil:</strong> Receitas ' + money(totalBR.income,'R$') + ' • Despesas ' + money(totalBR.expense,'R$') + ' • Aportes ' + money(totalBR.aportes,'R$') + ' • Resgates ' + money(totalBR.resgates,'R$') + ' • Saldo <strong>' + money(totalBR.balance,'R$') + '</strong></p>' +
+        '</div>' +
+        block('ES', '🇪🇸 Espanha', '€') +
+        block('BR', '🇧🇷 Brasil', 'R$') +
+        '</div>';
 
-        const buildTable = (items, cur, prefix) => {
-            if (items.length === 0) {
-                return '<p style="color:#64748b;font-size:11px;padding:8px;background:#f8fafc;border-radius:4px;margin:0 0 10px;">Sem registros.</p>';
-            }
-            let rows = '';
-            items.forEach(t => {
-                const cat = getCategoryDisplay(t.categoryId);
-                rows += '<tr>' +
-                    '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + fmtDate(t.date) + '</td>' +
-                    '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.description) + '</td>' +
-                    '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(cat.name) + '</td>' +
-                    '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.assignedTo || 'Casal') + '</td>' +
-                    '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;">' + prefix + money(t.amount, cur) + '</td>' +
-                '</tr>';
+    // ---------- IFRAME ISOLADO ----------
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;left:-2000px;top:0;width:900px;height:1200px;border:0;background:#fff;';
+    document.body.appendChild(iframe);
+
+    const idoc = iframe.contentDocument || iframe.contentWindow.document;
+    idoc.open();
+    idoc.write(
+        '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+        '<style>html,body{margin:0;padding:0;background:#fff;}</style>' +
+        '</head><body>' + htmlContent + '</body></html>'
+    );
+    idoc.close();
+
+    // Espera paint
+    const waitForPaint = () => new Promise(resolve => {
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                setTimeout(resolve, 300);
             });
-            return '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;">' +
-                '<thead><tr style="background:#f1f5f9;">' +
-                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:70px;">Data</th>' +
-                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Descrição</th>' +
-                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Categoria</th>' +
-                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:100px;">Responsável</th>' +
-                    '<th style="padding:6px 8px;text-align:right;border:1px solid #cbd5e1;width:100px;">Valor</th>' +
-                '</tr></thead><tbody>' + rows + '</tbody></table>';
-        };
+        });
+    });
 
-        const block = (country, label, cur) => {
-            const exp = filterBy(country, t => t.type === 'expense');
-            const inc = filterBy(country, t => t.type === 'income');
-            const apo = filterBy(country, isAporte);
-            const res = filterBy(country, isResgate);
-            return '<div style="margin-bottom:20px;">' +
-                '<h3 style="color:#1e3a5f;font-size:13px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">' + label + '</h3>' +
-                '<p style="font-size:11px;font-weight:600;color:#dc2626;margin:8px 0 4px;">Despesas (' + money(sum(exp), cur) + ')</p>' + buildTable(exp, cur, '-') +
-                '<p style="font-size:11px;font-weight:600;color:#059669;margin:8px 0 4px;">Receitas (' + money(sum(inc), cur) + ')</p>' + buildTable(inc, cur, '+') +
-                '<p style="font-size:11px;font-weight:600;color:#8b5cf6;margin:8px 0 4px;">Aportes (' + money(sum(apo), cur) + ')</p>' + buildTable(apo, cur, '-') +
-                '<p style="font-size:11px;font-weight:600;color:#d97706;margin:8px 0 4px;">Resgates (' + money(sum(res), cur) + ')</p>' + buildTable(res, cur, '+') +
-            '</div>';
-        };
-
-        const totalES = calcMonth(txs.filter(t => t.country === 'ES'));
-        const totalBR = calcMonth(txs.filter(t => t.country === 'BR'));
-
-        const htmlContent =
-            '<div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;background:#fff;padding:20px;">' +
-            '<h1 style="color:#1e3a5f;font-size:18px;margin:0 0 4px;">FinFam — Relatório Mensal</h1>' +
-            '<p style="font-size:11px;color:#64748b;margin:0 0 12px;">Mês: <strong>' + selMonth + '</strong> • Gerado em: ' + new Date().toLocaleString('pt-BR') + '</p>' +
-            '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:0 0 16px;">' +
-                '<p style="font-size:11px;margin:0 0 6px;font-weight:600;color:#1e3a5f;">Resumo Consolidado</p>' +
-                '<p style="font-size:10px;margin:2px 0;">🇪🇸 <strong>Espanha:</strong> Receitas ' + money(totalES.income,'€') + ' • Despesas ' + money(totalES.expense,'€') + ' • Aportes ' + money(totalES.aportes,'€') + ' • Resgates ' + money(totalES.resgates,'€') + ' • Saldo <strong>' + money(totalES.balance,'€') + '</strong></p>' +
-                '<p style="font-size:10px;margin:2px 0;">🇧🇷 <strong>Brasil:</strong> Receitas ' + money(totalBR.income,'R$') + ' • Despesas ' + money(totalBR.expense,'R$') + ' • Aportes ' + money(totalBR.aportes,'R$') + ' • Resgates ' + money(totalBR.resgates,'R$') + ' • Saldo <strong>' + money(totalBR.balance,'R$') + '</strong></p>' +
-            '</div>' +
-            block('ES', '🇪🇸 Espanha', '€') +
-            block('BR', '🇧🇷 Brasil', 'R$') +
-            '</div>';
-
-        // ---------- IFRAME ISOLADO (imune a extensões) ----------
-        const iframe = document.createElement('iframe');
-        iframe.style.cssText = 'position:fixed;left:-2000px;top:0;width:900px;height:1200px;border:0;background:#fff;';
-        document.body.appendChild(iframe);
-
-        const idoc = iframe.contentDocument || iframe.contentWindow.document;
-        idoc.open();
-        idoc.write(
-            '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
-            '<style>html,body{margin:0;padding:0;background:#fff;}</style>' +
-            '</head><body>' + htmlContent + '</body></html>'
+    // Mede ALTURA REAL do conteúdo — resolve o corte
+    const getFullHeight = () => {
+        const body = idoc.body;
+        const html = idoc.documentElement;
+        return Math.max(
+            body.scrollHeight, body.offsetHeight,
+            html.clientHeight, html.scrollHeight, html.offsetHeight
         );
-        idoc.close();
+    };
 
-        const proceed = () => {
+    iframe.onload = () => {
+        waitForPaint().then(() => {
+            const fullHeight = getFullHeight();
+
             const opt = {
                 margin: [8, 8, 8, 8],
                 filename: 'FinFam_Relatorio_' + selMonth + '.pdf',
@@ -1170,7 +1192,9 @@ const App = (() => {
                     logging: false,
                     backgroundColor: '#ffffff',
                     width: 900,
+                    height: fullHeight,          // ✅ altura real
                     windowWidth: 900,
+                    windowHeight: fullHeight,    // ✅ captura inteira
                     scrollX: 0,
                     scrollY: 0,
                     allowTaint: true,
@@ -1190,12 +1214,9 @@ const App = (() => {
                     iframe.remove();
                     showToast('Erro ao exportar PDF: ' + (err && err.message ? err.message : ''), 'error');
                 });
-        };
-
-        // Espera o iframe renderizar completamente
-        setTimeout(proceed, 800);
+        });
     };
-
+};
     // -------- CSV --------
     const exportToCSV = () => {
         const ym = state.selectedMonth || new Date().toISOString().slice(0,7);
