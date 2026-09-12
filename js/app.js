@@ -699,29 +699,27 @@ const App = (() => {
         init();
     };
 
-   const nav = (element) => {
-    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    element.classList.add('active');
-    const targetPage = element.getAttribute('data-page');
-    const p = el(targetPage);
-    if (p) p.classList.add('active');
-    
-    if (targetPage === 'dashboard') {
-        syncFromDrive(true);
-    } else if (targetPage === 'settings') {
-        checkConnection();
-        const settingsPage = el('settings');
-        if (settingsPage) settingsPage.innerHTML = renderSettings();
-    } else if (targetPage === 'reports') {
-        const reportContainer = el('reportContainer');
-        if (reportContainer) {
-            reportContainer.innerHTML = renderMonthlyReport();
-            const monthPicker = el('reportMonthPicker');
-            if (monthPicker) monthPicker.value = state.selectedMonth;
+      const nav = (element) => {
+        document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        element.classList.add('active');
+        const targetPage = element.getAttribute('data-page');
+        const p = el(targetPage);
+        if (p) p.classList.add('active');
+        
+        if (targetPage === 'settings') {
+            const settingsPage = el('settings');
+            if (settingsPage) settingsPage.innerHTML = renderSettings();
+        } else if (targetPage === 'reports') {
+            const reportContainer = el('reportContainer');
+            if (reportContainer) {
+                reportContainer.innerHTML = renderMonthlyReport();
+                const monthPicker = el('reportMonthPicker');
+                if (monthPicker) monthPicker.value = state.selectedMonth;
+            }
         }
-    }
-};
+    };
+
 
     const togglePrivacy = () => {
         state.privacyMode = !state.privacyMode;
@@ -944,86 +942,126 @@ const App = (() => {
         `;
     };
 
-    const renderMonthlyReport = () => {
-        const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
-        const txs = state.transactions.filter(t => t.date && t.date.startsWith(selMonth));
+ const renderMonthlyReport = () => {
+    const selMonth = state.selectedMonth || new Date().toISOString().slice(0, 7);
 
-        const expES = txs.filter(t => t.country === 'ES' && t.type === 'expense');
-        const expBR = txs.filter(t => t.country === 'BR' && t.type === 'expense');
+    // Função auxiliar para extrair 'AAAA-MM' de qualquer formato de data
+    const getYearMonth = (dateStr) => {
+        if (!dateStr) return '';
+        const s = String(dateStr).trim();
+        // Caso AAAA-MM-DD ou AAAA-MM
+        if (/^\d{4}-\d{2}/.test(s)) {
+            return s.slice(0, 7);
+        }
+        // Caso DD/MM/AAAA
+        const brMatch = s.match(/^\d{1,2}\/(\d{1,2})\/(\d{4})/);
+        if (brMatch) {
+            const m = brMatch[1].padStart(2, '0');
+            const y = brMatch[2];
+            return `${y}-${m}`;
+        }
+        // Fallback usando Date
+        try {
+            const d = new Date(s);
+            if (!isNaN(d.getTime())) {
+                const y = d.getFullYear();
+                const m = String(d.getMonth() + 1).padStart(2, '0');
+                return `${y}-${m}`;
+            }
+        } catch (e) {}
+        return '';
+    };
 
-        const totalES = expES.reduce((acc, t) => acc + t.amount, 0);
-        const totalBR = expBR.reduce((acc, t) => acc + t.amount, 0);
+    // Filtra todas as transações que pertencem ao mês selecionado
+    const txs = (state.transactions || []).filter(t => {
+        if (!t || !t.date) return false;
+        return getYearMonth(t.date) === selMonth;
+    });
 
-        return `
-            <div id="reportContainer">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
-                    <div>
-                        <h2 style="color: var(--navy); margin: 0 0 4px 0;">Relatório Mensal</h2>
-                        <p style="color: var(--text-light); margin: 0; font-size: 14px;">Detalhamento das despesas por categoria</p>
-                    </div>
-                    <div style="display: flex; gap: 12px; align-items: center;">
-                        <input type="month" id="reportMonthPicker" class="input-field" value="${selMonth}" onchange="App.changeReportMonth(this.value)" style="width: auto;">
-                        <button class="btn-secondary" onclick="App.exportToPDF()">📄 PDF</button>
-                        <button class="btn-secondary" onclick="App.exportToCSV()">📊 CSV</button>
-                    </div>
+    // Filtra despesas com tolerância a maiúsculas/minúsculas e fallback para ES
+    const expES = txs.filter(t => {
+        const country = String(t.country || 'ES').trim().toUpperCase();
+        const type = String(t.type || '').trim().toLowerCase();
+        return country === 'ES' && (type === 'expense' || type === 'despesa');
+    });
+
+    const expBR = txs.filter(t => {
+        const country = String(t.country || '').trim().toUpperCase();
+        const type = String(t.type || '').trim().toLowerCase();
+        return country === 'BR' && (type === 'expense' || type === 'despesa');
+    });
+
+    const totalES = expES.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+    const totalBR = expBR.reduce((acc, t) => acc + (Number(t.amount) || 0), 0);
+
+    return `
+        <div id="reportContainer">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 16px;">
+                <div>
+                    <h2 style="color: var(--navy); margin: 0 0 4px 0;">Relatório Mensal</h2>
+                    <p style="color: var(--text-light); margin: 0; font-size: 14px;">Detalhamento das despesas por categoria (${txs.length} lançamentos no mês)</p>
                 </div>
-
-                <div class="card" style="padding: 24px; margin-bottom: 24px;">
-                    <h3 style="color: var(--navy); margin-top: 0;">🇪🇸 Despesas em Espanha (${fmtMoney(totalES, state.settings.currencyES)})</h3>
-                    <div class="table-container">
-                        <table class="data-table">
-                            <thead>
-                                <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
-                            </thead>
-                            <tbody>
-                                ${expES.length === 0 ? `
-                                    <tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:20px;">Nenhuma despesa no mês.</td></tr>
-                                ` : expES.map(t => {
-                                    const cat = state.categories.find(c => c.id === t.categoryId);
-                                    return `
-                                        <tr>
-                                            <td>${fmtDate(t.date)}</td>
-                                            <td><strong>${t.description}</strong></td>
-                                            <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
-                                            <td>${t.assignedTo || 'Casal'}</td>
-                                            <td style="text-align: right; font-weight: 600;">${fmtMoney(t.amount, state.settings.currencyES)}</td>
-                                        </tr>
-                                    `;
-                                }).join('')}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <div class="card" style="padding: 24px;">
-                    <h3 style="color: var(--navy); margin-top: 0;">🇧🇷 Despesas no Brasil (${fmtMoney(totalBR, state.settings.currencyBR)})</h3>
-                    <div class="table-container">
-                        <table class="data-table">
-                            <thead>
-                                <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
-                            </thead>
-                            <tbody>
-                                ${expBR.length === 0 ? `
-                                    <tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:20px;">Nenhuma despesa no mês.</td></tr>
-                                ` : expBR.map(t => {
-                                    const cat = state.categories.find(c => c.id === t.categoryId);
-                                    return `
-                                        <tr>
-                                            <td>${fmtDate(t.date)}</td>
-                                            <td><strong>${t.description}</strong></td>
-                                            <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
-                                            <td>${t.assignedTo || 'Casal'}</td>
-                                            <td style="text-align: right; font-weight: 600;">${fmtMoney(t.amount, state.settings.currencyBR)}</td>
-                                        </tr>
-                                    `;
-                                }).join('')}
-                            </tbody>
-                        </table>
-                    </div>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <input type="month" id="reportMonthPicker" class="input-field" value="${selMonth}" onchange="App.changeReportMonth(this.value)" style="width: auto;">
+                    <button class="btn-secondary" onclick="App.exportToPDF()">📄 PDF</button>
+                    <button class="btn-secondary" onclick="App.exportToCSV()">📊 CSV</button>
                 </div>
             </div>
-        `;
-    };
+            <div class="card" style="padding: 24px; margin-bottom: 24px;">
+                <h3 style="color: var(--navy); margin-top: 0;">🇪🇸 Despesas em Espanha (${fmtMoney(totalES, state.settings?.currencyES || '€')})</h3>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
+                        </thead>
+                        <tbody>
+                            ${expES.length === 0 ? `
+                                <tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:20px;">Nenhuma despesa no mês.</td></tr>
+                            ` : expES.map(t => {
+                                const cat = (state.categories || []).find(c => c.id === t.categoryId);
+                                return `
+                                    <tr>
+                                        <td>${fmtDate(t.date)}</td>
+                                        <td><strong>${t.description || '-'}</strong></td>
+                                        <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
+                                        <td>${t.assignedTo || 'Casal'}</td>
+                                        <td style="text-align: right; font-weight: 600;">${fmtMoney(t.amount, state.settings?.currencyES || '€')}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="card" style="padding: 24px;">
+                <h3 style="color: var(--navy); margin-top: 0;">🇧🇷 Despesas no Brasil (${fmtMoney(totalBR, state.settings?.currencyBR || 'R$')})</h3>
+                <div class="table-container">
+                    <table class="data-table">
+                        <thead>
+                            <tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Responsável</th><th style="text-align: right;">Valor</th></tr>
+                        </thead>
+                        <tbody>
+                            ${expBR.length === 0 ? `
+                                <tr><td colspan="5" style="text-align:center;color:var(--text-light);padding:20px;">Nenhuma despesa no mês.</td></tr>
+                            ` : expBR.map(t => {
+                                const cat = (state.categories || []).find(c => c.id === t.categoryId);
+                                return `
+                                    <tr>
+                                        <td>${fmtDate(t.date)}</td>
+                                        <td><strong>${t.description || '-'}</strong></td>
+                                        <td>${cat ? cat.icon + ' ' + cat.name : '-'}</td>
+                                        <td>${t.assignedTo || 'Casal'}</td>
+                                        <td style="text-align: right; font-weight: 600;">${fmtMoney(t.amount, state.settings?.currencyBR || 'R$')}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    `;
+};
 
     const renderSettings = () => {
         return `
