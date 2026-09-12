@@ -1,7 +1,7 @@
 // ============================================================
 // FinFam — Controle Financeiro Familiar
 // Arquivo: js/app.js
-// Versão: 3.1 (aporte/resgate + PDF corrigido + duplo câmbio)
+// Versão: 4.0 (sanitização defensiva + PDF robusto + aporte/resgate)
 // ============================================================
 
 const App = (() => {
@@ -60,6 +60,7 @@ const App = (() => {
     const parseDateToYMD = (val) => {
         if (!val) return '';
         const s = String(val).trim();
+        if (!s) return '';
 
         const brMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
         if (brMatch) return `${brMatch[3]}-${brMatch[2].padStart(2,'0')}-${brMatch[1].padStart(2,'0')}`;
@@ -125,31 +126,101 @@ const App = (() => {
         t._timeout = setTimeout(() => t.classList.remove('show'), 3500);
     };
 
-    const getCategoryDisplay = (categoryId) => {
-        const c = state.categories.find(x => x.id === categoryId);
-        if (!c) return { name: 'Geral', icon: '📋' };
-        const clean = c.name
-            .replace(/\s*\((espanha|es|brasil|br)\)\s*/gi, '')
-            .replace(/\s*-\s*(espanha|es|brasil|br)\s*$/gi, '')
-            .trim();
-        return { name: clean, icon: c.icon || '📋' };
+    // ============================================================
+    // SANITIZAÇÃO — previne "BR BR", "🇧🇷 BR", valores inválidos
+    // ============================================================
+    const sanitizeCountry = (raw) => {
+        if (!raw) return 'ES';
+        const s = String(raw).toUpperCase();
+        // Pega as duas letras "BR" ou "ES" em qualquer posição da string
+        if (s.includes('BR') || s.includes('BRA')) return 'BR';
+        if (s.includes('ES') || s.includes('ESP')) return 'ES';
+        return 'ES';
     };
 
-    const getInvestmentCategory = () =>
-        state.categories.find(c => c.id === 'cat_invest') ||
-        state.categories.find(c => c.type === 'investment') ||
-        state.categories[0];
-
-    const getResponsibleOptions = (selected) => {
-        const names = new Set(['Casal / Ambos']);
-        (state.users || []).forEach(u => { if (u?.name) names.add(u.name); });
-        if (selected && selected !== 'Casal' && selected !== 'Casal / Ambos') names.add(selected);
-        return Array.from(names)
-            .map(n => `<option value="${n}" ${selected === n ? 'selected' : ''}>${n}</option>`)
-            .join('');
+    const sanitizeType = (raw) => {
+        const s = String(raw || '').toLowerCase();
+        if (s.includes('income') || s.includes('receita'))  return 'income';
+        if (s.includes('invest'))                            return 'investment';
+        return 'expense';
     };
 
-    // ==================== SESSÃO ====================
+    const sanitizeAmount = (raw) => {
+        if (raw === null || raw === undefined) return 0;
+        if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
+        // Aceita "1.234,56" ou "1234.56" ou "1,234.56"
+        let s = String(raw).trim();
+        if (!s) return 0;
+        // Remove símbolos de moeda
+        s = s.replace(/[€R$\s]/g, '');
+        // Se tem vírgula e ponto: assume "1.234,56" (pt-BR)
+        if (s.includes(',') && s.includes('.')) {
+            if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+                s = s.replace(/\./g, '').replace(',', '.');
+            } else {
+                s = s.replace(/,/g, '');
+            }
+        } else if (s.includes(',')) {
+            s = s.replace(',', '.');
+        }
+        const n = parseFloat(s);
+        return Number.isFinite(n) ? n : 0;
+    };
+
+    const sanitizeInvestAction = (raw) => {
+        const s = String(raw || '').toLowerCase();
+        return s === 'resgate' ? 'resgate' : 'aporte';
+    };
+
+    // ============================================================
+    // NORMALIZAÇÃO DE TRANSAÇÃO
+    // ============================================================
+    const normalizeTx = (t) => {
+        if (!t || typeof t !== 'object') return null;
+
+        const rawDate = t.date || t.Data || '';
+        const ymd = parseDateToYMD(rawDate) || new Date().toISOString().slice(0,10);
+        const type = sanitizeType(t.type || t.Tipo);
+        const isInv = type === 'investment';
+
+        return {
+            id:           String(t.id || t.ID || ('tx_' + generateId())),
+            type:         type,
+            date:         ymd,
+            description:  String(t.description || t['Descrição'] || '').trim(),
+            categoryId:   String(t.categoryId || t.CategoriaID || (isInv ? 'cat_invest' : 'cat_outros_es')),
+            country:      sanitizeCountry(t.country || t['País']),
+            amount:       sanitizeAmount(t.amount ?? t.Valor),
+            assignedTo:   String(t.assignedTo || t['Responsável'] || 'Casal / Ambos').trim(),
+            investAction: isInv ? sanitizeInvestAction(t.investAction || t.action) : undefined,
+            createdAt:    t.createdAt || new Date().toISOString(),
+            updatedAt:    t.updatedAt || t.createdAt || new Date().toISOString()
+        };
+    };
+
+    // Prepara transação para envio ao Drive — remove undefined, força tipos primitivos
+    const sanitizeTxForDrive = (tx) => {
+        const out = {
+            id:          String(tx.id || ''),
+            type:        String(tx.type || 'expense'),
+            date:        String(tx.date || ''),
+            description: String(tx.description || ''),
+            categoryId:  String(tx.categoryId || ''),
+            country:     String(tx.country || 'ES'),
+            amount:      Number(tx.amount) || 0,
+            assignedTo:  String(tx.assignedTo || 'Casal / Ambos'),
+            createdAt:   String(tx.createdAt || new Date().toISOString()),
+            updatedAt:   String(tx.updatedAt || new Date().toISOString())
+        };
+        if (tx.type === 'investment') {
+            out.investAction = String(tx.investAction || 'aporte');
+        }
+        return out;
+    };
+
+    // ============================================================
+    // AUTH
+    // ============================================================
     const getSession = () => {
         const raw = sessionStorage.getItem(SESSION_KEY);
         if (!raw) return null;
@@ -196,13 +267,20 @@ const App = (() => {
         }
     };
 
-    // ==================== ESTADO ====================
+    // ============================================================
+    // ESTADO
+    // ============================================================
     const initState = () => {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
             try {
                 const parsed = JSON.parse(raw);
                 state = { ...state, ...parsed };
+
+                // SEMPRE normaliza transações vindas do storage
+                const rawTxs = Array.isArray(state.transactions) ? state.transactions : [];
+                state.transactions = rawTxs.map(normalizeTx).filter(Boolean);
+
                 state.categories = [...defaultCategories];
                 if (!state.selectedMonth) state.selectedMonth = new Date().toISOString().slice(0,7);
                 if (!state.settings) {
@@ -213,8 +291,10 @@ const App = (() => {
                 }
                 if (!state.settings.apiToken) state.settings.apiToken = DEFAULT_TOKEN;
                 if (!Array.isArray(state.users)) state.users = [];
-                if (!Array.isArray(state.transactions)) state.transactions = [];
-            } catch(e) { resetState(); }
+            } catch(e) {
+                console.error('initState parse error:', e);
+                resetState();
+            }
         } else {
             resetState();
         }
@@ -240,15 +320,21 @@ const App = (() => {
     const saveState = () => {
         const toSave = {
             users: state.users,
-            transactions: state.transactions,
+            transactions: state.transactions.map(sanitizeTxForDrive),
             settings: state.settings,
             privacyMode: state.privacyMode,
             selectedMonth: state.selectedMonth
         };
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+        } catch(e) {
+            console.error('saveState error:', e);
+        }
     };
 
-    // ==================== OVERLAY DE CONEXÃO ====================
+    // ============================================================
+    // OVERLAY DE CONEXÃO
+    // ============================================================
     const showConnectionOverlay = () => {
         if (el('connOverlay')) return;
         const ov = document.createElement('div');
@@ -281,7 +367,9 @@ const App = (() => {
         setTimeout(() => el('connOverlay')?.remove(), 350);
     };
 
-    // ==================== GOOGLE DRIVE ====================
+    // ============================================================
+    // GOOGLE DRIVE
+    // ============================================================
     const driveCall = async (payload) => {
         const url = state.settings.googleScriptUrl;
         if (!url) throw new Error('URL do Google Apps Script não configurada.');
@@ -292,14 +380,11 @@ const App = (() => {
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const text = await res.text();
-        let data;
         try {
-            data = JSON.parse(text);
+            return JSON.parse(text);
         } catch (e) {
-            // Resposta não é JSON — provavelmente erro do Apps Script
-            throw new Error(`Resposta inválida do Drive: ${text.slice(0, 120)}`);
+            throw new Error(`Resposta não-JSON do Drive: ${text.slice(0, 120)}`);
         }
-        return data;
     };
 
     const checkConnection = async () => {
@@ -314,7 +399,7 @@ const App = (() => {
                 showToast(`⚠️ ${data?.message || 'Resposta inesperada.'}`, 'warning');
             }
         } catch (e) {
-            showToast('❌ Falha ao conectar: ' + (e.message || 'erro desconhecido'), 'error');
+            showToast('❌ ' + (e.message || 'Falha ao conectar.'), 'error');
         }
     };
 
@@ -324,43 +409,43 @@ const App = (() => {
             return;
         }
         try {
+            // SANITIZA TUDO antes de enviar
+            const cleanTx = state.transactions.map(sanitizeTxForDrive).filter(t => t.id && t.date);
+            const cleanUsers = state.users.map(u => ({
+                id: String(u.id || ''),
+                name: String(u.name || ''),
+                email: String(u.email || ''),
+                passwordHash: String(u.passwordHash || ''),
+                role: String(u.role || 'user'),
+                createdAt: String(u.createdAt || new Date().toISOString())
+            }));
+            const cleanSettings = {
+                currencyBR: String(state.settings.currencyBR || 'R$'),
+                currencyES: String(state.settings.currencyES || '€'),
+                monthStartDay: Number(state.settings.monthStartDay) || 1,
+                googleScriptUrl: String(state.settings.googleScriptUrl || ''),
+                apiToken: String(state.settings.apiToken || DEFAULT_TOKEN)
+            };
+
             const data = await driveCall({
                 action: 'sync',
                 data: {
-                    transactions: state.transactions,
-                    users: state.users,
-                    settings: state.settings,
+                    transactions: cleanTx,
+                    users: cleanUsers,
+                    settings: cleanSettings,
                     lastSync: new Date().toISOString()
                 }
             });
+
             if (data?.status === 'ok' || data?.status === 'success') {
-                showToast(`✅ ${state.transactions.length} registros salvos no Drive!`);
+                showToast(`✅ ${cleanTx.length} registros salvos no Drive!`);
             } else {
                 showToast(data?.message || '❌ Erro ao salvar no Drive.', 'error');
             }
         } catch (e) {
             console.error('syncToDrive:', e);
-            showToast('❌ Erro ao comunicar com o Google Drive.', 'error');
+            showToast('❌ ' + (e.message || 'Erro ao comunicar com o Google Drive.'), 'error');
         }
-    };
-
-    const normalizeTx = (t) => {
-        if (!t || typeof t !== 'object') return null;
-        const type = (t.type || t.Tipo || 'expense').toString().toLowerCase();
-        const isInv = type === 'investment';
-        return {
-            id:           t.id || t.ID || ('tx_' + generateId()),
-            type:         ['expense','income','investment'].includes(type) ? type : 'expense',
-            date:         parseDateToYMD(t.date || t.Data) || new Date().toISOString().slice(0,10),
-            description:  t.description || t['Descrição'] || '',
-            categoryId:   t.categoryId || t.CategoriaID || 'cat_outros_es',
-            country:      (t.country || t['País'] || 'ES').toString().toUpperCase().slice(0,2),
-            amount:       Number(t.amount ?? t.Valor ?? 0) || 0,
-            assignedTo:   t.assignedTo || t['Responsável'] || 'Casal / Ambos',
-            investAction: isInv ? ((t.investAction || t.action || 'aporte').toString().toLowerCase() === 'resgate' ? 'resgate' : 'aporte') : undefined,
-            createdAt:    t.createdAt || new Date().toISOString(),
-            updatedAt:    t.updatedAt || t.createdAt || new Date().toISOString()
-        };
     };
 
     const mergeDriveData = (remote) => {
@@ -395,7 +480,6 @@ const App = (() => {
             if (!silent) showToast('🔄 Sincronizando com o Drive...', 'info');
             const data = await driveCall({ action: 'fetch' });
 
-            // Aceita vários formatos sem quebrar
             const payload =
                 (data && typeof data === 'object' && data.data && typeof data.data === 'object') ? data.data :
                 (data && typeof data === 'object') ? data : {};
@@ -413,7 +497,6 @@ const App = (() => {
                 if (!silent) showToast(`✅ ${state.transactions.length} registros sincronizados!`);
                 if (localOnlyCount > 0) syncToDrive();
             } else if (ok && !payload.transactions) {
-                // Drive vazio mas resposta válida — não é erro, apenas não há nada remoto
                 if (!silent) showToast('ℹ️ Drive sem dados ainda. Base local preservada.', 'info');
             } else if (!silent) {
                 showToast(data?.message || '❌ Erro ao consultar o Drive.', 'error');
@@ -429,19 +512,20 @@ const App = (() => {
         await syncFromDrive(false);
     };
 
-    // ==================== CÁLCULOS (com aporte/resgate) ====================
-    // Helpers para classificar movimentação de investimento
-    const isAporte = (t) => t.type === 'investment' && (t.investAction || 'aporte') !== 'resgate';
+    // ============================================================
+    // CÁLCULOS
+    // ============================================================
+    const isAporte  = (t) => t.type === 'investment' && (t.investAction || 'aporte') !== 'resgate';
     const isResgate = (t) => t.type === 'investment' && (t.investAction || 'aporte') === 'resgate';
 
     const calcMonth = (txs) => {
         const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
-        const income       = sum(txs.filter(t => t.type === 'income'));
-        const expense      = sum(txs.filter(t => t.type === 'expense'));
-        const aportes      = sum(txs.filter(isAporte));
-        const resgates     = sum(txs.filter(isResgate));
-        const investment   = aportes - resgates;               // líquido do mês
-        const balance      = income - expense - aportes + resgates;
+        const income   = sum(txs.filter(t => t.type === 'income'));
+        const expense  = sum(txs.filter(t => t.type === 'expense'));
+        const aportes  = sum(txs.filter(isAporte));
+        const resgates = sum(txs.filter(isResgate));
+        const investment = aportes - resgates;
+        const balance = income - expense - aportes + resgates;
         return { income, expense, investment, aportes, resgates, balance };
     };
 
@@ -449,7 +533,7 @@ const App = (() => {
         const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
         const allAportes  = sum(state.transactions.filter(isAporte));
         const allResgates = sum(state.transactions.filter(isResgate));
-        const totalInvestments = allAportes - allResgates;      // patrimônio acumulado
+        const totalInvestments = allAportes - allResgates;
         const totalIncomeAll   = sum(state.transactions.filter(t => t.type === 'income'));
         const totalExpenseAll  = sum(state.transactions.filter(t => t.type === 'expense'));
         const netWorth = totalInvestments + (totalIncomeAll - totalExpenseAll - allAportes + allResgates);
@@ -465,13 +549,13 @@ const App = (() => {
         const month  = calcMonth(txs);
         const totals = calcTotals();
 
-        // Duplo câmbio: separa o mês por país
+        // Filtro por país usa country JÁ normalizado
         const esTxs = txs.filter(t => t.country === 'ES');
         const brTxs = txs.filter(t => t.country === 'BR');
         const monthES = calcMonth(esTxs);
         const monthBR = calcMonth(brTxs);
 
-        return { ym, txs, ...month, ...totals, monthES, monthBR };
+        return { ym, txs, ...month, ...totals, monthES, monthBR, countES: esTxs.length, countBR: brTxs.length };
     };
 
     const changeSelectedMonth = (m) => {
@@ -487,7 +571,9 @@ const App = (() => {
         navByPage('reports');
     };
 
-    // ==================== NAVEGAÇÃO ====================
+    // ============================================================
+    // NAVEGAÇÃO
+    // ============================================================
     const navByPage = (pageId) => {
         document.querySelectorAll('.sidebar .nav-item').forEach(b => {
             b.classList.toggle('active', b.getAttribute('data-page') === pageId);
@@ -503,7 +589,9 @@ const App = (() => {
         navByPage(pageId);
     };
 
-    // ==================== RENDERIZAÇÃO ====================
+    // ============================================================
+    // RENDERIZAÇÃO
+    // ============================================================
     const refreshAllViews = () => {
         const d = el('dashboard');    if (d) d.innerHTML = renderDashboard();
         const t = el('transactions'); if (t) t.innerHTML = renderTransactions();
@@ -525,22 +613,14 @@ const App = (() => {
                         <p style="color:var(--text-light);margin:0;font-size:14px">Configuração Inicial do Administrador</p>
                     </div>
                     <form onsubmit="App.doSetup(event)">
-                        <div class="form-group">
-                            <label class="form-label">Nome Completo</label>
-                            <input type="text" id="setupName" class="input-field" placeholder="Ex: João Silva" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">E-mail</label>
-                            <input type="email" id="setupEmail" class="input-field" placeholder="seu@email.com" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Senha</label>
-                            <input type="password" id="setupPassword" class="input-field" placeholder="Mínimo 6 caracteres" minlength="6" required>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">URL do Google Apps Script (opcional agora)</label>
-                            <input type="url" id="setupScriptUrl" class="input-field" placeholder="https://script.google.com/macros/s/...">
-                        </div>
+                        <div class="form-group"><label class="form-label">Nome Completo</label>
+                            <input type="text" id="setupName" class="input-field" placeholder="Ex: João Silva" required></div>
+                        <div class="form-group"><label class="form-label">E-mail</label>
+                            <input type="email" id="setupEmail" class="input-field" placeholder="seu@email.com" required></div>
+                        <div class="form-group"><label class="form-label">Senha</label>
+                            <input type="password" id="setupPassword" class="input-field" placeholder="Mínimo 6 caracteres" minlength="6" required></div>
+                        <div class="form-group"><label class="form-label">URL do Google Apps Script (opcional)</label>
+                            <input type="url" id="setupScriptUrl" class="input-field" placeholder="https://script.google.com/macros/s/..."></div>
                         <button type="submit" class="btn-primary" style="width:100%;margin-top:8px">Criar Administrador e Iniciar</button>
                     </form>
                 </div>
@@ -581,14 +661,10 @@ const App = (() => {
                         <p style="color:var(--text-light);margin:0;font-size:14px">Controle Financeiro Familiar</p>
                     </div>
                     <form onsubmit="App.doLogin(event)">
-                        <div class="form-group">
-                            <label class="form-label">E-mail</label>
-                            <input type="email" id="loginEmail" class="input-field" required autocomplete="username">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Senha</label>
-                            <input type="password" id="loginPassword" class="input-field" required autocomplete="current-password">
-                        </div>
+                        <div class="form-group"><label class="form-label">E-mail</label>
+                            <input type="email" id="loginEmail" class="input-field" required autocomplete="username"></div>
+                        <div class="form-group"><label class="form-label">Senha</label>
+                            <input type="password" id="loginPassword" class="input-field" required autocomplete="current-password"></div>
                         <button type="submit" class="btn-primary" style="width:100%;margin-top:8px">Entrar</button>
                     </form>
                 </div>
@@ -624,7 +700,7 @@ const App = (() => {
         refreshAllViews();
     };
 
-    // -------- Badge de tipo (com aporte/resgate) --------
+    // -------- Badges e valores --------
     const renderTypeBadge = (t) => {
         if (t.type === 'income')  return '<span class="badge badge-success">Receita</span>';
         if (t.type === 'expense') return '<span class="badge badge-danger">Despesa</span>';
@@ -641,6 +717,11 @@ const App = (() => {
                    : t.type === 'expense' ? '-'
                    : isResgate(t) ? '+' : '-';
         return `<span style="font-weight:600;color:${color}">${sign}${fmtMoney(t.amount, cur)}</span>`;
+    };
+
+    const renderCountryLabel = (country) => {
+        const c = sanitizeCountry(country);
+        return c === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES';
     };
 
     // -------- DASHBOARD --------
@@ -663,19 +744,19 @@ const App = (() => {
             <h3 style="color:var(--text-light);font-size:12px;text-transform:uppercase;letter-spacing:.8px;margin:0 0 10px">🇪🇸 Movimento em Euros (€)</h3>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px">
                 <div class="card stat-card">
-                    <div class="stat-label">Saldo Livre €</div>
+                    <div class="stat-label">Saldo Livre</div>
                     <div class="stat-value ${m.monthES.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.monthES.balance, '€')}</div>
                 </div>
                 <div class="card stat-card">
-                    <div class="stat-label">Receitas €</div>
+                    <div class="stat-label">Receitas</div>
                     <div class="stat-value emerald-text">${fmtMoney(m.monthES.income, '€')}</div>
                 </div>
                 <div class="card stat-card">
-                    <div class="stat-label">Despesas €</div>
+                    <div class="stat-label">Despesas</div>
                     <div class="stat-value danger-text">${fmtMoney(m.monthES.expense, '€')}</div>
                 </div>
                 <div class="card stat-card" style="border-left:4px solid #8b5cf6">
-                    <div class="stat-label">Aportes €</div>
+                    <div class="stat-label">Aportes</div>
                     <div class="stat-value" style="color:#8b5cf6">${fmtMoney(m.monthES.aportes, '€')}</div>
                     ${m.monthES.resgates > 0 ? `<div style="font-size:11px;color:var(--warning);margin-top:4px">Resgates: ${fmtMoney(m.monthES.resgates, '€')}</div>` : ''}
                 </div>
@@ -684,19 +765,19 @@ const App = (() => {
             <h3 style="color:var(--text-light);font-size:12px;text-transform:uppercase;letter-spacing:.8px;margin:0 0 10px">🇧🇷 Movimento em Reais (R$)</h3>
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:24px">
                 <div class="card stat-card">
-                    <div class="stat-label">Saldo Livre R$</div>
+                    <div class="stat-label">Saldo Livre</div>
                     <div class="stat-value ${m.monthBR.balance >= 0 ? 'emerald-text' : 'danger-text'}">${fmtMoney(m.monthBR.balance, 'R$')}</div>
                 </div>
                 <div class="card stat-card">
-                    <div class="stat-label">Receitas R$</div>
+                    <div class="stat-label">Receitas</div>
                     <div class="stat-value emerald-text">${fmtMoney(m.monthBR.income, 'R$')}</div>
                 </div>
                 <div class="card stat-card">
-                    <div class="stat-label">Despesas R$</div>
+                    <div class="stat-label">Despesas</div>
                     <div class="stat-value danger-text">${fmtMoney(m.monthBR.expense, 'R$')}</div>
                 </div>
                 <div class="card stat-card" style="border-left:4px solid #8b5cf6">
-                    <div class="stat-label">Aportes R$</div>
+                    <div class="stat-label">Aportes</div>
                     <div class="stat-value" style="color:#8b5cf6">${fmtMoney(m.monthBR.aportes, 'R$')}</div>
                     ${m.monthBR.resgates > 0 ? `<div style="font-size:11px;color:var(--warning);margin-top:4px">Resgates: ${fmtMoney(m.monthBR.resgates, 'R$')}</div>` : ''}
                 </div>
@@ -704,7 +785,7 @@ const App = (() => {
 
             <div class="card stat-card net-worth-card" style="margin-bottom:24px">
                 <div class="stat-label">🏦 Patrimônio Total (Investimentos Acumulados)</div>
-                <div class="net-worth-value">${fmtMoney(m.totalInvestments, state.settings.currencyES)}</div>
+                <div class="net-worth-value">${fmtMoney(m.totalInvestments, '€')}</div>
                 <div style="font-size:12px;color:var(--text-light);margin-top:6px">
                     Aportes totais: ${fmtMoney(m.allAportes, '€')} &nbsp;•&nbsp;
                     Resgates totais: ${fmtMoney(m.allResgates, '€')}
@@ -742,7 +823,7 @@ const App = (() => {
                                             <td><strong>${t.description || '-'}</strong></td>
                                             <td>${cat.icon} ${cat.name}</td>
                                             <td>${t.assignedTo || 'Casal'}</td>
-                                            <td>${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</td>
+                                            <td>${renderCountryLabel(t.country)}</td>
                                             <td>${renderTypeBadge(t)}</td>
                                             <td style="text-align:right">${renderTxValue(t, cur)}</td>
                                         </tr>`;
@@ -819,7 +900,7 @@ const App = (() => {
                                             <td><strong>${t.description || '-'}</strong></td>
                                             <td>${cat.icon} ${cat.name}</td>
                                             <td>${t.assignedTo || 'Casal'}</td>
-                                            <td>${t.country === 'BR' ? '🇧🇷 BR' : '🇪🇸 ES'}</td>
+                                            <td>${renderCountryLabel(t.country)}</td>
                                             <td>${renderTypeBadge(t)}</td>
                                             <td style="text-align:right">${renderTxValue(t, cur)}</td>
                                             <td style="text-align:center;white-space:nowrap">
@@ -892,7 +973,7 @@ const App = (() => {
                 <div class="no-print" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;flex-wrap:wrap;gap:16px">
                     <div>
                         <h2 style="color:var(--navy);margin:0 0 4px 0">Relatório Mensal</h2>
-                        <p style="color:var(--text-light);margin:0;font-size:14px">Detalhamento financeiro consolidado (${txs.length} lançamentos no mês)</p>
+                        <p style="color:var(--text-light);margin:0;font-size:14px">Detalhamento financeiro consolidado (${txs.length} lançamentos)</p>
                     </div>
                     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
                         <input type="month" id="reportMonthPicker" class="input-field" value="${selMonth}" onchange="App.changeReportMonth(this.value)" style="width:auto">
@@ -902,52 +983,121 @@ const App = (() => {
                 </div>
 
                 <h2 style="color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px;margin-bottom:16px">🇪🇸 Espanha</h2>
-                ${section('Despesas em Espanha',       expES, sum(expES), state.settings.currencyES, 'badge-danger',  '-')}
-                ${section('Receitas em Espanha',       incES, sum(incES), state.settings.currencyES, 'badge-success', '+')}
-                ${section('Aportes em Espanha',        apoES, sum(apoES), state.settings.currencyES, 'badge-purple',  '-')}
-                ${section('Resgates em Espanha',       resES, sum(resES), state.settings.currencyES, 'badge-warning', '+')}
+                ${section('Despesas em Espanha', expES, sum(expES), '€', 'badge-danger', '-')}
+                ${section('Receitas em Espanha', incES, sum(incES), '€', 'badge-success', '+')}
+                ${section('Aportes em Espanha', apoES, sum(apoES), '€', 'badge-purple', '-')}
+                ${section('Resgates em Espanha', resES, sum(resES), '€', 'badge-warning', '+')}
 
                 <h2 style="color:var(--navy);border-bottom:2px solid var(--border);padding-bottom:8px;margin:28px 0 16px">🇧🇷 Brasil</h2>
-                ${section('Despesas no Brasil',        expBR, sum(expBR), state.settings.currencyBR, 'badge-danger',  '-')}
-                ${section('Receitas no Brasil',        incBR, sum(incBR), state.settings.currencyBR, 'badge-success', '+')}
-                ${section('Aportes no Brasil',         apoBR, sum(apoBR), state.settings.currencyBR, 'badge-purple',  '-')}
-                ${section('Resgates no Brasil',        resBR, sum(resBR), state.settings.currencyBR, 'badge-warning', '+')}
+                ${section('Despesas no Brasil', expBR, sum(expBR), 'R$', 'badge-danger', '-')}
+                ${section('Receitas no Brasil', incBR, sum(incBR), 'R$', 'badge-success', '+')}
+                ${section('Aportes no Brasil', apoBR, sum(apoBR), 'R$', 'badge-purple', '-')}
+                ${section('Resgates no Brasil', resBR, sum(resBR), 'R$', 'badge-warning', '+')}
             </div>`;
     };
 
-    // -------- EXPORTAÇÃO PDF (CORRIGIDA) --------
+    // ============================================================
+    // PDF — ABORDAGEM DEFINITIVA: renderiza HTML próprio, limpo
+    // ============================================================
     const exportToPDF = () => {
-        const container = el('reportContainer');
-        if (!container) { showToast('Relatório não renderizado.', 'error'); return; }
         if (typeof html2pdf === 'undefined') { showToast('Biblioteca PDF não carregada.', 'error'); return; }
+
+        const selMonth = state.selectedMonth || new Date().toISOString().slice(0,7);
+        const txs = state.transactions
+            .filter(t => t && t.date && getYearMonth(t.date) === selMonth)
+            .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
+
+        if (txs.length === 0) { showToast('Nenhum dado para exportar neste mês.', 'info'); return; }
 
         showToast('📄 Gerando PDF...', 'info');
 
-        // Clone visualmente acessível (não use left:-9999px nem display:none)
-        const clone = container.cloneNode(true);
-        clone.querySelectorAll('.no-print').forEach(n => n.remove());
-        clone.id = 'pdfTempExportContainer';
-        clone.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 900px;
-            background: #ffffff;
-            padding: 24px;
-            z-index: -1;
-            opacity: 0.001;
-            pointer-events: none;
-            overflow: visible;
-        `;
+        const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
+        const filterBy = (country, pred) => txs.filter(t => t.country === country && pred(t));
+        const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const money = (v, cur) => `${cur} ${Number(v||0).toFixed(2).replace('.', ',')}`;
 
-        document.body.appendChild(clone);
+        const buildTable = (items, cur, prefix) => {
+            if (items.length === 0) {
+                return `<p style="color:#64748b;font-size:11px;padding:8px;background:#f8fafc;border-radius:4px;">Nenhum registro no mês.</p>`;
+            }
+            return `
+                <table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;">
+                    <thead>
+                        <tr style="background:#f1f5f9;">
+                            <th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:70px;">Data</th>
+                            <th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Descrição</th>
+                            <th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Categoria</th>
+                            <th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:100px;">Responsável</th>
+                            <th style="padding:6px 8px;text-align:right;border:1px solid #cbd5e1;width:100px;">Valor</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map(t => {
+                            const cat = getCategoryDisplay(t.categoryId);
+                            return `
+                                <tr>
+                                    <td style="padding:5px 8px;border:1px solid #e2e8f0;">${fmtDate(t.date)}</td>
+                                    <td style="padding:5px 8px;border:1px solid #e2e8f0;">${esc(t.description)}</td>
+                                    <td style="padding:5px 8px;border:1px solid #e2e8f0;">${esc(cat.name)}</td>
+                                    <td style="padding:5px 8px;border:1px solid #e2e8f0;">${esc(t.assignedTo || 'Casal')}</td>
+                                    <td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;">${prefix}${money(t.amount, cur)}</td>
+                                </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>`;
+        };
 
-        // Força reflow antes de capturar
-        void clone.offsetHeight;
+        const block = (country, label, cur) => {
+            const exp = filterBy(country, t => t.type === 'expense');
+            const inc = filterBy(country, t => t.type === 'income');
+            const apo = filterBy(country, isAporte);
+            const res = filterBy(country, isResgate);
+            return `
+                <div style="margin-bottom:20px;">
+                    <h3 style="color:#1e3a5f;font-size:13px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">${label}</h3>
+
+                    <p style="font-size:11px;font-weight:600;color:#dc2626;margin:8px 0 4px;">Despesas (${money(sum(exp), cur)})</p>
+                    ${buildTable(exp, cur, '-')}
+
+                    <p style="font-size:11px;font-weight:600;color:#059669;margin:8px 0 4px;">Receitas (${money(sum(inc), cur)})</p>
+                    ${buildTable(inc, cur, '+')}
+
+                    <p style="font-size:11px;font-weight:600;color:#8b5cf6;margin:8px 0 4px;">Aportes (${money(sum(apo), cur)})</p>
+                    ${buildTable(apo, cur, '-')}
+
+                    <p style="font-size:11px;font-weight:600;color:#d97706;margin:8px 0 4px;">Resgates (${money(sum(res), cur)})</p>
+                    ${buildTable(res, cur, '+')}
+                </div>`;
+        };
+
+        const totalES = calcMonth(txs.filter(t => t.country === 'ES'));
+        const totalBR = calcMonth(txs.filter(t => t.country === 'BR'));
+
+        const html = `
+            <div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;padding:10px;background:#fff;">
+                <h1 style="color:#1e3a5f;font-size:18px;margin:0 0 4px;">FinFam — Relatório Mensal</h1>
+                <p style="font-size:11px;color:#64748b;margin:0 0 4px;">Mês: <strong>${selMonth}</strong> • Gerado em: ${new Date().toLocaleString('pt-BR')}</p>
+
+                <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:12px 0;">
+                    <p style="font-size:11px;margin:0 0 6px;font-weight:600;color:#1e3a5f;">Resumo Consolidado</p>
+                    <p style="font-size:10px;margin:2px 0;">🇪🇸 <strong>Espanha:</strong> Receitas ${money(totalES.income,'€')} • Despesas ${money(totalES.expense,'€')} • Aportes ${money(totalES.aportes,'€')} • Resgates ${money(totalES.resgates,'€')} • Saldo <strong>${money(totalES.balance,'€')}</strong></p>
+                    <p style="font-size:10px;margin:2px 0;">🇧🇷 <strong>Brasil:</strong> Receitas ${money(totalBR.income,'R$')} • Despesas ${money(totalBR.expense,'R$')} • Aportes ${money(totalBR.aportes,'R$')} • Resgates ${money(totalBR.resgates,'R$')} • Saldo <strong>${money(totalBR.balance,'R$')}</strong></p>
+                </div>
+
+                ${block('ES', '🇪🇸 Espanha', '€')}
+                ${block('BR', '🇧🇷 Brasil', 'R$')}
+            </div>`;
+
+        // Container temporário VISÍVEL (não display:none, não opacity:0)
+        const wrapper = document.createElement('div');
+        wrapper.id = 'pdfTempWrapper';
+        wrapper.style.cssText = 'position:fixed;top:0;left:0;width:900px;background:#fff;z-index:999999;padding:20px;';
+        wrapper.innerHTML = html;
+        document.body.appendChild(wrapper);
 
         const opt = {
             margin: [8, 8, 8, 8],
-            filename: `FinFam_Relatorio_${state.selectedMonth || 'mensal'}.pdf`,
+            filename: `FinFam_Relatorio_${selMonth}.pdf`,
             image: { type: 'jpeg', quality: 0.95 },
             html2canvas: {
                 scale: 2,
@@ -962,22 +1112,21 @@ const App = (() => {
             pagebreak: { mode: ['css', 'legacy'] }
         };
 
-        // Delay curto garante que o navegador pintou o clone
         setTimeout(() => {
-            html2pdf().set(opt).from(clone).save()
+            html2pdf().set(opt).from(wrapper).save()
                 .then(() => {
-                    clone.remove();
+                    wrapper.remove();
                     showToast('✅ PDF gerado com sucesso!', 'success');
                 })
                 .catch(err => {
                     console.error('exportToPDF:', err);
-                    clone.remove();
+                    wrapper.remove();
                     showToast('Erro ao exportar PDF.', 'error');
                 });
-        }, 200);
+        }, 250);
     };
 
-    // -------- EXPORTAÇÃO CSV --------
+    // -------- CSV --------
     const exportToCSV = () => {
         const ym = state.selectedMonth || new Date().toISOString().slice(0,7);
         const txs = state.transactions
@@ -1006,14 +1155,10 @@ const App = (() => {
         txs.forEach(t => {
             const cat = getCategoryDisplay(t.categoryId);
             const cur = t.country === 'BR' ? 'BRL' : 'EUR';
-            const typeStr = t.type === 'expense' ? 'Despesa'
-                          : t.type === 'income'  ? 'Receita'
-                          : 'Investimento';
+            const typeStr = t.type === 'expense' ? 'Despesa' : t.type === 'income' ? 'Receita' : 'Investimento';
             const movement = t.type === 'investment' ? (isResgate(t) ? 'Resgate' : 'Aporte') : '';
             const numVal = (Number(t.amount) || 0).toFixed(2).replace('.', ',');
-            const sign = t.type === 'expense' ? '-'
-                       : t.type === 'income'  ? '+'
-                       : isResgate(t) ? '+' : '-';
+            const sign = t.type === 'expense' ? '-' : t.type === 'income' ? '+' : (isResgate(t) ? '+' : '-');
             const desc = (t.description || '').replace(/;/g, ',');
             const resp = (t.assignedTo || 'Casal').replace(/;/g, ',');
             csv += `${fmtDate(t.date)};${desc};${cat.name};${resp};${t.country || 'ES'};${typeStr};${movement};"${sign}${numVal}";${numVal};${cur}\r\n`;
@@ -1028,7 +1173,7 @@ const App = (() => {
         a.click();
         a.remove();
         URL.revokeObjectURL(url);
-        showToast('📊 Arquivo CSV gerado com sucesso!', 'success');
+        showToast('📊 CSV gerado!', 'success');
     };
 
     // -------- CONFIGURAÇÕES --------
@@ -1138,7 +1283,9 @@ const App = (() => {
     const cleanGhostData = () => {
         if (!confirm('Limpar lançamentos sem data, descrição ou valor?')) return;
         const before = state.transactions.length;
-        state.transactions = state.transactions.filter(t => t && t.date && t.description && Number(t.amount) > 0);
+        state.transactions = state.transactions
+            .map(normalizeTx)
+            .filter(t => t && t.date && t.description && Number(t.amount) > 0);
         saveState();
         syncToDrive();
         refreshAllViews();
@@ -1158,7 +1305,9 @@ const App = (() => {
         location.reload();
     };
 
-    // -------- MODAL DE LANÇAMENTO (com aporte/resgate) --------
+    // ============================================================
+    // MODAL DE LANÇAMENTO
+    // ============================================================
     const showTransactionModal = (txId) => {
         const tx = txId ? state.transactions.find(t => t.id === txId) : null;
         const isInvestment = tx ? tx.type === 'investment' : false;
@@ -1169,19 +1318,20 @@ const App = (() => {
         if (!overlay || !content) { showToast('Erro: modal não encontrado.', 'error'); return; }
 
         const defaultDate = tx ? parseDateToYMD(tx.date) : new Date().toISOString().slice(0,10);
+        const currentCountry = tx ? sanitizeCountry(tx.country) : 'ES';
 
         content.innerHTML = `
             <div class="modal-header">
                 <div class="modal-title">${tx ? 'Editar Lançamento' : 'Novo Lançamento'}</div>
                 <button class="close-btn" onclick="App.closeModal()" type="button">&times;</button>
             </div>
-            <form onsubmit="App.saveTransaction(event, '${tx ? tx.id : ''}')">
+            <form onsubmit="App.saveTransaction(event, '${tx ? tx.id : ''}')" autocomplete="off">
                 <div class="form-group">
                     <label class="form-label">Tipo</label>
                     <select id="txType" class="input-field" onchange="App.onTxTypeChange(this.value)">
-                        <option value="expense"    ${tx?.type === 'expense'    ? 'selected' : ''}>Despesa</option>
-                        <option value="income"     ${tx?.type === 'income'     ? 'selected' : ''}>Receita</option>
-                        <option value="investment" ${isInvestment              ? 'selected' : ''}>Investimento (Aporte / Resgate)</option>
+                        <option value="expense"    ${tx?.type === 'expense' ? 'selected' : ''}>Despesa</option>
+                        <option value="income"     ${tx?.type === 'income'  ? 'selected' : ''}>Receita</option>
+                        <option value="investment" ${isInvestment           ? 'selected' : ''}>Investimento (Aporte / Resgate)</option>
                     </select>
                 </div>
 
@@ -1192,8 +1342,8 @@ const App = (() => {
                         <option value="resgate" ${investAction === 'resgate' ? 'selected' : ''}>💸 Resgate — usar para pagar contas</option>
                     </select>
                     <div style="font-size:11px;color:var(--text-light);margin-top:6px;line-height:1.4">
-                        <strong>Aporte:</strong> reduz o Saldo Livre e aumenta o Patrimônio.<br>
-                        <strong>Resgate:</strong> devolve valor ao Saldo Livre para uso no mês.
+                        <strong>Aporte:</strong> sai do Saldo Livre e vai para o Patrimônio.<br>
+                        <strong>Resgate:</strong> volta do Patrimônio para o Saldo Livre.
                     </div>
                 </div>
 
@@ -1203,7 +1353,7 @@ const App = (() => {
                 </div>
                 <div class="form-group">
                     <label class="form-label">Descrição</label>
-                    <input type="text" id="txDescription" class="input-field" value="${tx ? (tx.description || '') : ''}" placeholder="Ex: Mercado, Salário, Aporte mensal..." required>
+                    <input type="text" id="txDescription" class="input-field" value="${tx ? String(tx.description || '').replace(/"/g,'&quot;') : ''}" placeholder="Ex: Mercado, Salário, Aporte mensal..." required>
                 </div>
                 <div class="form-group" id="categoryGroup" style="${isInvestment ? 'display:none;' : ''}">
                     <label class="form-label">Categoria</label>
@@ -1224,8 +1374,8 @@ const App = (() => {
                     <div class="form-group">
                         <label class="form-label">País / Moeda</label>
                         <select id="txCountry" class="input-field">
-                            <option value="ES" ${!tx || tx.country === 'ES' ? 'selected' : ''}>🇪🇸 Espanha (€)</option>
-                            <option value="BR" ${tx?.country === 'BR' ? 'selected' : ''}>🇧🇷 Brasil (R$)</option>
+                            <option value="ES" ${currentCountry === 'ES' ? 'selected' : ''}>🇪🇸 Espanha (€)</option>
+                            <option value="BR" ${currentCountry === 'BR' ? 'selected' : ''}>🇧🇷 Brasil (R$)</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -1257,57 +1407,88 @@ const App = (() => {
 
     const saveTransaction = (e, txId) => {
         e.preventDefault();
-        const type        = el('txType').value;
-        const date        = el('txDate').value;
-        const description = el('txDescription').value.trim();
-        const country     = el('txCountry').value;
-        const amount      = parseFloat(el('txAmount').value);
-        const assignedTo  = el('txAssignedTo').value;
-        const investAction = type === 'investment' ? (el('txInvestAction')?.value || 'aporte') : undefined;
+        try {
+            const type        = el('txType').value;
+            const date        = el('txDate').value;
+            const description = el('txDescription').value.trim();
+            const country     = sanitizeCountry(el('txCountry').value);
+            const amountRaw   = el('txAmount').value;
+            const amount      = sanitizeAmount(amountRaw);
+            const assignedTo  = el('txAssignedTo').value;
 
-        const categoryId = type === 'investment'
-            ? getInvestmentCategory().id
-            : el('txCategory').value;
-
-        if (!date || !description || isNaN(amount) || amount <= 0) {
-            showToast('Informe data, descrição e valor positivo válido.', 'error');
-            return;
-        }
-
-        const cleanYMD = parseDateToYMD(date);
-
-        if (txId) {
-            const idx = state.transactions.findIndex(t => t.id === txId);
-            if (idx !== -1) {
-                state.transactions[idx] = {
-                    ...state.transactions[idx],
-                    type, date: cleanYMD, description, categoryId,
-                    country, amount, assignedTo,
-                    investAction,
-                    updatedAt: new Date().toISOString()
-                };
+            let investAction;
+            if (type === 'investment') {
+                investAction = sanitizeInvestAction(el('txInvestAction')?.value);
             }
-        } else {
-            state.transactions.unshift({
-                id: 'tx_' + generateId(),
-                type, date: cleanYMD, description, categoryId,
-                country, amount, assignedTo,
-                investAction,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
-            });
+
+            const categoryId = type === 'investment'
+                ? getInvestmentCategory().id
+                : (el('txCategory').value || 'cat_outros_es');
+
+            if (!date || !description) {
+                showToast('Informe data e descrição.', 'error'); return;
+            }
+            if (!Number.isFinite(amount) || amount <= 0) {
+                showToast('Informe um valor numérico positivo.', 'error'); return;
+            }
+
+            const cleanYMD = parseDateToYMD(date);
+            if (!cleanYMD || cleanYMD.length !== 10) {
+                showToast('Data inválida.', 'error'); return;
+            }
+
+            const now = new Date().toISOString();
+
+            if (txId) {
+                const idx = state.transactions.findIndex(t => t.id === txId);
+                if (idx === -1) { showToast('Lançamento não encontrado.', 'error'); return; }
+
+                const updated = {
+                    ...state.transactions[idx],
+                    type,
+                    date: cleanYMD,
+                    description,
+                    categoryId,
+                    country,
+                    amount,
+                    assignedTo,
+                    updatedAt: now
+                };
+                if (type === 'investment') updated.investAction = investAction;
+                else delete updated.investAction;
+
+                state.transactions[idx] = normalizeTx(updated);
+            } else {
+                const newTx = {
+                    id: 'tx_' + generateId(),
+                    type,
+                    date: cleanYMD,
+                    description,
+                    categoryId,
+                    country,
+                    amount,
+                    assignedTo,
+                    createdAt: now,
+                    updatedAt: now
+                };
+                if (type === 'investment') newTx.investAction = investAction;
+                state.transactions.unshift(normalizeTx(newTx));
+            }
+
+            saveState();
+            closeModal();
+            refreshAllViews();
+            syncToDrive();
+
+            const msg = txId ? '✅ Lançamento atualizado!'
+                      : type === 'investment'
+                        ? (investAction === 'resgate' ? '💸 Resgate registrado!' : '💰 Aporte registrado!')
+                        : '✅ Lançamento registrado!';
+            showToast(msg, 'success');
+        } catch (err) {
+            console.error('saveTransaction error:', err);
+            showToast('Erro ao salvar: ' + (err.message || 'desconhecido'), 'error');
         }
-
-        saveState();
-        closeModal();
-        refreshAllViews();
-        syncToDrive();
-
-        const msg = txId ? 'Lançamento atualizado!'
-                  : type === 'investment'
-                    ? (investAction === 'resgate' ? '💸 Resgate registrado!' : '💰 Aporte registrado!')
-                    : 'Lançamento registrado!';
-        showToast(msg, 'success');
     };
 
     const deleteTransaction = (txId) => {
@@ -1319,7 +1500,9 @@ const App = (() => {
         showToast('Lançamento removido.', 'info');
     };
 
-    // ==================== APP PRINCIPAL ====================
+    // ============================================================
+    // APP PRINCIPAL
+    // ============================================================
     const renderApp = () => {
         el('app').innerHTML = `
             <div class="sidebar">
@@ -1358,7 +1541,9 @@ const App = (() => {
         resetInactivityTimer();
     };
 
-    // ==================== INIT ====================
+    // ============================================================
+    // INIT
+    // ============================================================
     const init = () => {
         initState();
 
@@ -1375,7 +1560,6 @@ const App = (() => {
         }
     };
 
-    // ==================== API PÚBLICA ====================
     return {
         init, doSetup, doLogin, logout, nav, togglePrivacy,
         changeSelectedMonth, changeReportMonth,
