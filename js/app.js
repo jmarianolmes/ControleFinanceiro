@@ -1,8 +1,7 @@
-
 // ============================================================
 // FinFam — Controle Financeiro Familiar
 // Arquivo: js/app.js
-// Versão: 5.0
+// Versão: 6.0 — limpa, sem duplicações
 // ============================================================
 
 const App = (() => {
@@ -130,7 +129,7 @@ const App = (() => {
             t.className = 'toast ' + type + ' show';
             clearTimeout(t._timeout);
             t._timeout = setTimeout(() => t.classList.remove('show'), 3500);
-        } catch(e) { console.warn('toast error:', e); }
+        } catch(e) {}
     };
 
     // ============================================================
@@ -154,11 +153,9 @@ const App = (() => {
     const sanitizeAmount = (raw) => {
         if (raw === null || raw === undefined) return 0;
         if (typeof raw === 'number') return Number.isFinite(raw) ? raw : 0;
-
         let s = String(raw).trim();
         if (!s) return 0;
         s = s.replace(/[^0-9.,-]/g, '');
-
         if (s.indexOf(',') !== -1 && s.indexOf('.') !== -1) {
             if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
                 s = s.replace(/\./g, '').replace(',', '.');
@@ -168,18 +165,19 @@ const App = (() => {
         } else if (s.indexOf(',') !== -1) {
             s = s.replace(',', '.');
         }
-
         const n = parseFloat(s);
         return Number.isFinite(n) ? n : 0;
     };
 
     const sanitizeInvestAction = (raw) => {
         const s = String(raw || '').toLowerCase();
-        return s === 'resgate' ? 'resgate' : 'aporte';
+        if (s === 'resgate_interno' || s === 'interno' || s === 'silencioso') return 'resgate_interno';
+        if (s === 'resgate') return 'resgate';
+        return 'aporte';
     };
 
     // ============================================================
-    // CATEGORIAS — funções helper
+    // CATEGORIAS HELPERS
     // ============================================================
     const getCategoryDisplay = (categoryId) => {
         const c = (state.categories || []).find(x => x && x.id === categoryId);
@@ -213,15 +211,26 @@ const App = (() => {
         if (!t || typeof t !== 'object') return null;
         try {
             const rawDate = t.date || t.Data || '';
-            const ymd = parseDateToYMD(rawDate) || new Date().toISOString().slice(0,10);
-            const type = sanitizeType(t.type || t.Tipo);
+            const rawDesc = String(t.description || t['Descrição'] || '').trim();
+            const rawType = t.type || t.Tipo;
+
+            if (String(rawDate).toLowerCase() === 'data' ||
+                String(rawType).toLowerCase() === 'tipo' ||
+                String(t.id || t.ID || '').toLowerCase() === 'id') {
+                return null;
+            }
+
+            const ymd = parseDateToYMD(rawDate);
+            if (!ymd || ymd.length !== 10) return null;
+
+            const type = sanitizeType(rawType);
             const isInv = type === 'investment';
 
             return {
                 id:           String(t.id || t.ID || ('tx_' + generateId())),
                 type:         type,
                 date:         ymd,
-                description:  String(t.description || t['Descrição'] || '').trim(),
+                description:  rawDesc,
                 categoryId:   String(t.categoryId || t.CategoriaID || (isInv ? 'cat_invest' : 'cat_outros_es')),
                 country:      sanitizeCountry(t.country || t['País']),
                 amount:       sanitizeAmount(t.amount !== undefined && t.amount !== null ? t.amount : t.Valor),
@@ -239,10 +248,11 @@ const App = (() => {
     const sanitizeTxForDrive = (tx) => {
         if (!tx || typeof tx !== 'object') return null;
         try {
+            if (!tx.date || tx.date.length !== 10) return null;
             const out = {
                 id:          String(tx.id || ''),
                 type:        String(tx.type || 'expense'),
-                date:        String(tx.date || ''),
+                date:        String(tx.date),
                 description: String(tx.description || ''),
                 categoryId:  String(tx.categoryId || ''),
                 country:     String(tx.country || 'ES'),
@@ -251,11 +261,10 @@ const App = (() => {
                 createdAt:   String(tx.createdAt || new Date().toISOString()),
                 updatedAt:   String(tx.updatedAt || new Date().toISOString())
             };
-            if (tx.type === 'investment') out.investAction = String(tx.investAction || 'aporte');
-            if (!out.id || !out.date) return null;
+            if (tx.type === 'investment') out.investAction = sanitizeInvestAction(tx.investAction);
+            if (!out.id) return null;
             return out;
         } catch(e) {
-            console.warn('sanitizeTxForDrive falhou:', tx, e);
             return null;
         }
     };
@@ -319,7 +328,7 @@ const App = (() => {
 
             let parsed;
             try { parsed = JSON.parse(raw); }
-            catch(e) { console.warn('JSON corrompido, recriando...', e); resetState(); return; }
+            catch(e) { resetState(); return; }
 
             if (!parsed || typeof parsed !== 'object') { resetState(); return; }
 
@@ -337,7 +346,7 @@ const App = (() => {
 
             state.categories = defaultCategories.slice();
         } catch(e) {
-            console.error('initState falhou. Resetando:', e);
+            console.error('initState falhou:', e);
             resetState();
         }
     };
@@ -397,7 +406,7 @@ const App = (() => {
                 if (bar) bar.style.width = p + '%';
                 if (pct) pct.textContent = p + '%';
             }, 300);
-        } catch(e) { console.warn('overlay error:', e); }
+        } catch(e) {}
     };
 
     const hideConnectionOverlay = () => {
@@ -444,70 +453,67 @@ const App = (() => {
     };
 
     const syncToDrive = async () => {
-    if (!state.settings.googleScriptUrl) {
-        showToast('⚠️ URL do Google Drive não configurada.', 'error');
-        return;
-    }
-    try {
-        const cleanTx = (state.transactions || []).map(sanitizeTxForDrive).filter(Boolean);
-        const cleanUsers = (state.users || []).filter(u => u && u.email).map(u => ({
-            id: String(u.id || ''),
-            name: String(u.name || ''),
-            email: String(u.email || ''),
-            passwordHash: String(u.passwordHash || ''),
-            role: String(u.role || 'user'),
-            createdAt: String(u.createdAt || new Date().toISOString())
-        }));
-        const cleanSettings = {
-            currencyBR: String(state.settings.currencyBR || 'R$'),
-            currencyES: String(state.settings.currencyES || '€'),
-            monthStartDay: Number(state.settings.monthStartDay) || 1,
-            googleScriptUrl: String(state.settings.googleScriptUrl || ''),
-            apiToken: String(state.settings.apiToken || DEFAULT_TOKEN)
-        };
-
-        const url = state.settings.googleScriptUrl;
-        const token = state.settings.apiToken || DEFAULT_TOKEN;
-
-        // ✅ Envia em DUPLO formato:
-        //    transactions na RAIZ (Apps Script atual espera assim)
-        //    + dentro de data{} (compatível com a doc original)
-        const payload = {
-            action: 'sync',
-            token: token,
-            transactions: cleanTx,               // ← Apps Script lê daqui
-            data: {                              // ← compatibilidade futura
-                transactions: cleanTx,
-                users: cleanUsers,
-                settings: cleanSettings,
-                lastSync: new Date().toISOString()
-            }
-        };
-
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-
-        const text = await res.text();
-        let data;
-        try { data = JSON.parse(text); }
-        catch (e) { throw new Error('Resposta não-JSON: ' + text.slice(0, 120)); }
-
-        if (data && (data.status === 'ok' || data.status === 'success')) {
-            showToast('✅ ' + cleanTx.length + ' registros salvos no Drive!');
-        } else {
-            showToast((data && data.message) || '❌ Erro ao salvar no Drive.', 'error');
+        if (!state.settings.googleScriptUrl) {
+            showToast('⚠️ URL do Google Drive não configurada.', 'error');
+            return;
         }
-    } catch (e) {
-        console.error('syncToDrive:', e);
-        showToast('❌ ' + (e.message || 'Erro ao comunicar com o Drive.'), 'error');
-    }
-};
-    
+        try {
+            const cleanTx = (state.transactions || []).map(sanitizeTxForDrive).filter(Boolean);
+            const cleanUsers = (state.users || []).filter(u => u && u.email).map(u => ({
+                id: String(u.id || ''),
+                name: String(u.name || ''),
+                email: String(u.email || ''),
+                passwordHash: String(u.passwordHash || ''),
+                role: String(u.role || 'user'),
+                createdAt: String(u.createdAt || new Date().toISOString())
+            }));
+            const cleanSettings = {
+                currencyBR: String(state.settings.currencyBR || 'R$'),
+                currencyES: String(state.settings.currencyES || '€'),
+                monthStartDay: Number(state.settings.monthStartDay) || 1,
+                googleScriptUrl: String(state.settings.googleScriptUrl || ''),
+                apiToken: String(state.settings.apiToken || DEFAULT_TOKEN)
+            };
+
+            const url = state.settings.googleScriptUrl;
+            const token = state.settings.apiToken || DEFAULT_TOKEN;
+
+            const payload = {
+                action: 'sync',
+                token: token,
+                transactions: cleanTx,
+                data: {
+                    transactions: cleanTx,
+                    users: cleanUsers,
+                    settings: cleanSettings,
+                    lastSync: new Date().toISOString()
+                }
+            };
+
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+
+            const text = await res.text();
+            let data;
+            try { data = JSON.parse(text); }
+            catch (e) { throw new Error('Resposta não-JSON: ' + text.slice(0, 120)); }
+
+            if (data && (data.status === 'ok' || data.status === 'success')) {
+                showToast('✅ ' + cleanTx.length + ' registros salvos no Drive!');
+            } else {
+                showToast((data && data.message) || '❌ Erro ao salvar no Drive.', 'error');
+            }
+        } catch (e) {
+            console.error('syncToDrive:', e);
+            showToast('❌ ' + (e.message || 'Erro ao comunicar com o Drive.'), 'error');
+        }
+    };
+
     const mergeDriveData = (remote) => {
         if (!remote || typeof remote !== 'object') return { localOnlyCount: 0, remoteCount: 0 };
         const remoteRaw = Array.isArray(remote.transactions) ? remote.transactions
@@ -573,8 +579,15 @@ const App = (() => {
     // ============================================================
     // CÁLCULOS
     // ============================================================
-    const isAporte  = (t) => t && t.type === 'investment' && (t.investAction || 'aporte') !== 'resgate';
-    const isResgate = (t) => t && t.type === 'investment' && (t.investAction || 'aporte') === 'resgate';
+    const isAporte          = (t) => t && t.type === 'investment' && (t.investAction || 'aporte') === 'aporte';
+    const isResgate         = (t) => t && t.type === 'investment' && t.investAction === 'resgate';
+    const isResgateInterno  = (t) => t && t.type === 'investment' && t.investAction === 'resgate_interno';
+
+    const afetaMes = (t) => {
+        if (!t) return false;
+        if (t.type === 'investment') return isAporte(t) || isResgate(t);
+        return t.type === 'income' || t.type === 'expense';
+    };
 
     const calcMonth = (txs) => {
         const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
@@ -582,8 +595,9 @@ const App = (() => {
         const expense  = sum(txs.filter(t => t.type === 'expense'));
         const aportes  = sum(txs.filter(isAporte));
         const resgates = sum(txs.filter(isResgate));
+        const internos = sum(txs.filter(isResgateInterno));
         return {
-            income, expense, aportes, resgates,
+            income, expense, aportes, resgates, internos,
             investment: aportes - resgates,
             balance: income - expense - aportes + resgates
         };
@@ -593,11 +607,12 @@ const App = (() => {
         const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
         const allAportes  = sum(state.transactions.filter(isAporte));
         const allResgates = sum(state.transactions.filter(isResgate));
-        const totalInvestments = allAportes - allResgates;
+        const allInternos = sum(state.transactions.filter(isResgateInterno));
+        const totalInvestments = allAportes - allResgates - allInternos;
         const totalIncomeAll   = sum(state.transactions.filter(t => t.type === 'income'));
         const totalExpenseAll  = sum(state.transactions.filter(t => t.type === 'expense'));
         const netWorth = totalInvestments + (totalIncomeAll - totalExpenseAll - allAportes + allResgates);
-        return { totalInvestments, totalIncomeAll, totalExpenseAll, allAportes, allResgates, netWorth };
+        return { totalInvestments, totalIncomeAll, totalExpenseAll, allAportes, allResgates, allInternos, netWorth };
     };
 
     const getSelectedMonthData = () => {
@@ -618,18 +633,8 @@ const App = (() => {
         );
     };
 
-    const changeSelectedMonth = (m) => {
-        state.selectedMonth = m;
-        saveState();
-        refreshAllViews();
-    };
-
-    const changeReportMonth = (m) => {
-        state.selectedMonth = m;
-        saveState();
-        refreshAllViews();
-        navByPage('reports');
-    };
+    const changeSelectedMonth = (m) => { state.selectedMonth = m; saveState(); refreshAllViews(); };
+    const changeReportMonth = (m) => { state.selectedMonth = m; saveState(); refreshAllViews(); navByPage('reports'); };
 
     // ============================================================
     // NAVEGAÇÃO
@@ -772,6 +777,7 @@ const App = (() => {
         if (t.type === 'income')  return '<span class="badge badge-success">Receita</span>';
         if (t.type === 'expense') return '<span class="badge badge-danger">Despesa</span>';
         if (isResgate(t))         return '<span class="badge badge-warning">Resgate</span>';
+        if (isResgateInterno(t))  return '<span class="badge badge-info">Resgate Interno</span>';
         return '<span class="badge badge-purple">Aporte</span>';
     };
 
@@ -779,6 +785,7 @@ const App = (() => {
         const color = t.type === 'income' ? 'var(--emerald)'
                     : t.type === 'expense' ? 'var(--danger)'
                     : isResgate(t) ? 'var(--warning)'
+                    : isResgateInterno(t) ? 'var(--slate)'
                     : 'var(--purple)';
         const sign = t.type === 'income' ? '+'
                    : t.type === 'expense' ? '-'
@@ -984,6 +991,7 @@ const App = (() => {
         const selMonth = state.selectedMonth || new Date().toISOString().slice(0,7);
         const txs = state.transactions
             .filter(t => t && t.date && getYearMonth(t.date) === selMonth)
+            .filter(afetaMes)
             .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
 
         const filterBy = (country, predicate) => txs.filter(t => t.country === country && predicate(t));
@@ -1060,275 +1068,140 @@ const App = (() => {
             </div>`;
     };
 
-    // -------- PDF --------
+    // ============================================================
+    // PDF — IFRAME ISOLADO
+    // ============================================================
     const exportToPDF = () => {
-    if (typeof html2pdf === 'undefined') {
-        showToast('Biblioteca PDF não carregada.', 'error');
-        return;
-    }
-
-    const selMonth = state.selectedMonth || new Date().toISOString().slice(0,7);
-    const txs = state.transactions
-        .filter(t => t && t.date && getYearMonth(t.date) === selMonth)
-        .filter(afetaMes)
-        .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
-
-    showToast('📄 Gerando PDF...', 'info');
-
-    const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
-    const filterBy = (country, pred) => txs.filter(t => t.country === country && pred(t));
-    const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const money = (v, cur) => cur + ' ' + Number(v||0).toFixed(2).replace('.', ',');
-
-    const buildTable = (items, cur, prefix) => {
-        if (items.length === 0) {
-            return '<p style="color:#64748b;font-size:11px;padding:8px;background:#f8fafc;border-radius:4px;margin:0 0 10px;">Sem registros.</p>';
+        if (typeof html2pdf === 'undefined') {
+            showToast('Biblioteca PDF não carregada.', 'error');
+            return;
         }
-        let rows = '';
-        items.forEach(t => {
-            const cat = getCategoryDisplay(t.categoryId);
-            rows += '<tr>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + fmtDate(t.date) + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.description) + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(cat.name) + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.assignedTo || 'Casal') + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;">' + prefix + money(t.amount, cur) + '</td>' +
-            '</tr>';
-        });
-        return '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;">' +
-            '<thead><tr style="background:#f1f5f9;">' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:70px;">Data</th>' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Descrição</th>' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Categoria</th>' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:100px;">Responsável</th>' +
-                '<th style="padding:6px 8px;text-align:right;border:1px solid #cbd5e1;width:100px;">Valor</th>' +
-            '</tr></thead><tbody>' + rows + '</tbody></table>';
-    };
 
-    const block = (country, label, cur) => {
-        const exp = filterBy(country, t => t.type === 'expense');
-        const inc = filterBy(country, t => t.type === 'income');
-        const apo = filterBy(country, isAporte);
-        const res = filterBy(country, isResgate);
-        return '<div style="margin-bottom:20px;">' +
-            '<h3 style="color:#1e3a5f;font-size:13px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">' + label + '</h3>' +
-            '<p style="font-size:11px;font-weight:600;color:#dc2626;margin:8px 0 4px;">Despesas (' + money(sum(exp), cur) + ')</p>' + buildTable(exp, cur, '-') +
-            '<p style="font-size:11px;font-weight:600;color:#059669;margin:8px 0 4px;">Receitas (' + money(sum(inc), cur) + ')</p>' + buildTable(inc, cur, '+') +
-            '<p style="font-size:11px;font-weight:600;color:#8b5cf6;margin:8px 0 4px;">Aportes (' + money(sum(apo), cur) + ')</p>' + buildTable(apo, cur, '-') +
-            '<p style="font-size:11px;font-weight:600;color:#d97706;margin:8px 0 4px;">Resgates (' + money(sum(res), cur) + ')</p>' + buildTable(res, cur, '+') +
-        '</div>';
-    };
+        const selMonth = state.selectedMonth || new Date().toISOString().slice(0,7);
+        const txs = state.transactions
+            .filter(t => t && t.date && getYearMonth(t.date) === selMonth)
+            .filter(afetaMes)
+            .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
 
-    const totalES = calcMonth(txs.filter(t => t.country === 'ES'));
-    const totalBR = calcMonth(txs.filter(t => t.country === 'BR'));
+        showToast('📄 Gerando PDF...', 'info');
 
-    const htmlContent =
-        '<div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;background:#fff;padding:20px;">' +
-        '<h1 style="color:#1e3a5f;font-size:18px;margin:0 0 4px;">FinFam — Relatório Mensal</h1>' +
-        '<p style="font-size:11px;color:#64748b;margin:0 0 12px;">Mês: <strong>' + selMonth + '</strong> • Gerado em: ' + new Date().toLocaleString('pt-BR') + '</p>' +
-        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:0 0 16px;">' +
-            '<p style="font-size:11px;margin:0 0 6px;font-weight:600;color:#1e3a5f;">Resumo Consolidado</p>' +
-            '<p style="font-size:10px;margin:2px 0;">🇪🇸 <strong>Espanha:</strong> Receitas ' + money(totalES.income,'€') + ' • Despesas ' + money(totalES.expense,'€') + ' • Aportes ' + money(totalES.aportes,'€') + ' • Resgates ' + money(totalES.resgates,'€') + ' • Saldo <strong>' + money(totalES.balance,'€') + '</strong></p>' +
-            '<p style="font-size:10px;margin:2px 0;">🇧🇷 <strong>Brasil:</strong> Receitas ' + money(totalBR.income,'R$') + ' • Despesas ' + money(totalBR.expense,'R$') + ' • Aportes ' + money(totalBR.aportes,'R$') + ' • Resgates ' + money(totalBR.resgates,'R$') + ' • Saldo <strong>' + money(totalBR.balance,'R$') + '</strong></p>' +
-        '</div>' +
-        block('ES', '🇪🇸 Espanha', '€') +
-        block('BR', '🇧🇷 Brasil', 'R$') +
-        '</div>';
+        const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
+        const filterBy = (country, pred) => txs.filter(t => t.country === country && pred(t));
+        const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const money = (v, cur) => cur + ' ' + Number(v||0).toFixed(2).replace('.', ',');
 
-    // ============================================================
-    // IFRAME ISOLADO — imune a extensões do navegador
-    // ============================================================
-    const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;left:0;top:0;width:900px;height:1200px;border:0;z-index:999999;background:#fff;visibility:hidden;';
-    document.body.appendChild(iframe);
-
-    const idoc = iframe.contentDocument || iframe.contentWindow.document;
-    idoc.open();
-    idoc.write(
-        '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
-        '<style>html,body{margin:0;padding:0;background:#fff;}</style>' +
-        '</head><body>' + htmlContent + '</body></html>'
-    );
-    idoc.close();
-
-    // Espera o iframe renderizar completamente
-    const proceed = () => {
-        const target = idoc.body;
-        const opt = {
-            margin: [8, 8, 8, 8],
-            filename: 'FinFam_Relatorio_' + selMonth + '.pdf',
-            image: { type: 'jpeg', quality: 0.95 },
-            html2canvas: {
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                backgroundColor: '#ffffff',
-                width: 900,
-                windowWidth: 900,
-                scrollX: 0,
-                scrollY: 0,
-                allowTaint: true,
-                foreignObjectRendering: false,
-                removeContainer: true
-            },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['css', 'legacy'] }
+        const buildTable = (items, cur, prefix) => {
+            if (items.length === 0) {
+                return '<p style="color:#64748b;font-size:11px;padding:8px;background:#f8fafc;border-radius:4px;margin:0 0 10px;">Sem registros.</p>';
+            }
+            let rows = '';
+            items.forEach(t => {
+                const cat = getCategoryDisplay(t.categoryId);
+                rows += '<tr>' +
+                    '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + fmtDate(t.date) + '</td>' +
+                    '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.description) + '</td>' +
+                    '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(cat.name) + '</td>' +
+                    '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.assignedTo || 'Casal') + '</td>' +
+                    '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;">' + prefix + money(t.amount, cur) + '</td>' +
+                '</tr>';
+            });
+            return '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;">' +
+                '<thead><tr style="background:#f1f5f9;">' +
+                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:70px;">Data</th>' +
+                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Descrição</th>' +
+                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Categoria</th>' +
+                    '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:100px;">Responsável</th>' +
+                    '<th style="padding:6px 8px;text-align:right;border:1px solid #cbd5e1;width:100px;">Valor</th>' +
+                '</tr></thead><tbody>' + rows + '</tbody></table>';
         };
 
-        html2pdf().set(opt).from(target).save()
-            .then(() => {
-                iframe.remove();
-                showToast('✅ PDF gerado com sucesso!', 'success');
-            })
-            .catch(err => {
-                console.error('exportToPDF:', err);
-                iframe.remove();
-                showToast('Erro ao exportar PDF: ' + (err && err.message ? err.message : ''), 'error');
-            });
-    };
+        const block = (country, label, cur) => {
+            const exp = filterBy(country, t => t.type === 'expense');
+            const inc = filterBy(country, t => t.type === 'income');
+            const apo = filterBy(country, isAporte);
+            const res = filterBy(country, isResgate);
+            return '<div style="margin-bottom:20px;">' +
+                '<h3 style="color:#1e3a5f;font-size:13px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">' + label + '</h3>' +
+                '<p style="font-size:11px;font-weight:600;color:#dc2626;margin:8px 0 4px;">Despesas (' + money(sum(exp), cur) + ')</p>' + buildTable(exp, cur, '-') +
+                '<p style="font-size:11px;font-weight:600;color:#059669;margin:8px 0 4px;">Receitas (' + money(sum(inc), cur) + ')</p>' + buildTable(inc, cur, '+') +
+                '<p style="font-size:11px;font-weight:600;color:#8b5cf6;margin:8px 0 4px;">Aportes (' + money(sum(apo), cur) + ')</p>' + buildTable(apo, cur, '-') +
+                '<p style="font-size:11px;font-weight:600;color:#d97706;margin:8px 0 4px;">Resgates (' + money(sum(res), cur) + ')</p>' + buildTable(res, cur, '+') +
+            '</div>';
+        };
 
-    // Duplo rAF + timeout longo = garante renderização completa do iframe
-    requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            setTimeout(proceed, 600);
-        });
-    });
-};
-    // ---------- helpers ----------
-    const sum = (arr) => arr.reduce((s,t) => s + (Number(t.amount) || 0), 0);
-    const filterBy = (country, pred) => txs.filter(t => t.country === country && pred(t));
-    const esc = (s) => String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    const money = (v, cur) => cur + ' ' + Number(v||0).toFixed(2).replace('.', ',');
+        const totalES = calcMonth(txs.filter(t => t.country === 'ES'));
+        const totalBR = calcMonth(txs.filter(t => t.country === 'BR'));
 
-    const buildTable = (items, cur, prefix) => {
-        if (items.length === 0) {
-            return '<p style="color:#64748b;font-size:11px;padding:8px;background:#f8fafc;border-radius:4px;margin:0 0 10px;">Sem registros.</p>';
-        }
-        let rows = '';
-        items.forEach(t => {
-            const cat = getCategoryDisplay(t.categoryId);
-            rows += '<tr>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + fmtDate(t.date) + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.description) + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(cat.name) + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;">' + esc(t.assignedTo || 'Casal') + '</td>' +
-                '<td style="padding:5px 8px;border:1px solid #e2e8f0;text-align:right;">' + prefix + money(t.amount, cur) + '</td>' +
-            '</tr>';
-        });
-        return '<table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:12px;">' +
-            '<thead><tr style="background:#f1f5f9;">' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:70px;">Data</th>' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Descrição</th>' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;">Categoria</th>' +
-                '<th style="padding:6px 8px;text-align:left;border:1px solid #cbd5e1;width:100px;">Responsável</th>' +
-                '<th style="padding:6px 8px;text-align:right;border:1px solid #cbd5e1;width:100px;">Valor</th>' +
-            '</tr></thead><tbody>' + rows + '</tbody></table>';
-    };
+        const htmlContent =
+            '<div style="font-family:Arial,Helvetica,sans-serif;color:#1e293b;background:#fff;padding:20px;">' +
+            '<h1 style="color:#1e3a5f;font-size:18px;margin:0 0 4px;">FinFam — Relatório Mensal</h1>' +
+            '<p style="font-size:11px;color:#64748b;margin:0 0 12px;">Mês: <strong>' + selMonth + '</strong> • Gerado em: ' + new Date().toLocaleString('pt-BR') + '</p>' +
+            '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:0 0 16px;">' +
+                '<p style="font-size:11px;margin:0 0 6px;font-weight:600;color:#1e3a5f;">Resumo Consolidado</p>' +
+                '<p style="font-size:10px;margin:2px 0;">🇪🇸 <strong>Espanha:</strong> Receitas ' + money(totalES.income,'€') + ' • Despesas ' + money(totalES.expense,'€') + ' • Aportes ' + money(totalES.aportes,'€') + ' • Resgates ' + money(totalES.resgates,'€') + ' • Saldo <strong>' + money(totalES.balance,'€') + '</strong></p>' +
+                '<p style="font-size:10px;margin:2px 0;">🇧🇷 <strong>Brasil:</strong> Receitas ' + money(totalBR.income,'R$') + ' • Despesas ' + money(totalBR.expense,'R$') + ' • Aportes ' + money(totalBR.aportes,'R$') + ' • Resgates ' + money(totalBR.resgates,'R$') + ' • Saldo <strong>' + money(totalBR.balance,'R$') + '</strong></p>' +
+            '</div>' +
+            block('ES', '🇪🇸 Espanha', '€') +
+            block('BR', '🇧🇷 Brasil', 'R$') +
+            '</div>';
 
-    const block = (country, label, cur) => {
-        const exp = filterBy(country, t => t.type === 'expense');
-        const inc = filterBy(country, t => t.type === 'income');
-        const apo = filterBy(country, isAporte);
-        const res = filterBy(country, isResgate);
-        return '<div style="margin-bottom:20px;">' +
-            '<h3 style="color:#1e3a5f;font-size:13px;margin:0 0 8px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;">' + label + '</h3>' +
-            '<p style="font-size:11px;font-weight:600;color:#dc2626;margin:8px 0 4px;">Despesas (' + money(sum(exp), cur) + ')</p>' + buildTable(exp, cur, '-') +
-            '<p style="font-size:11px;font-weight:600;color:#059669;margin:8px 0 4px;">Receitas (' + money(sum(inc), cur) + ')</p>' + buildTable(inc, cur, '+') +
-            '<p style="font-size:11px;font-weight:600;color:#8b5cf6;margin:8px 0 4px;">Aportes (' + money(sum(apo), cur) + ')</p>' + buildTable(apo, cur, '-') +
-            '<p style="font-size:11px;font-weight:600;color:#d97706;margin:8px 0 4px;">Resgates (' + money(sum(res), cur) + ')</p>' + buildTable(res, cur, '+') +
-        '</div>';
-    };
+        // ---------- IFRAME ISOLADO (imune a extensões) ----------
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'position:fixed;left:-2000px;top:0;width:900px;height:1200px;border:0;background:#fff;';
+        document.body.appendChild(iframe);
 
-    const totalES = calcMonth(txs.filter(t => t.country === 'ES'));
-    const totalBR = calcMonth(txs.filter(t => t.country === 'BR'));
+        const idoc = iframe.contentDocument || iframe.contentWindow.document;
+        idoc.open();
+        idoc.write(
+            '<!DOCTYPE html><html><head><meta charset="UTF-8">' +
+            '<style>html,body{margin:0;padding:0;background:#fff;}</style>' +
+            '</head><body>' + htmlContent + '</body></html>'
+        );
+        idoc.close();
 
-    const htmlContent =
-        '<h1 style="color:#1e3a5f;font-size:18px;margin:0 0 4px;">FinFam — Relatório Mensal</h1>' +
-        '<p style="font-size:11px;color:#64748b;margin:0 0 12px;">Mês: <strong>' + selMonth + '</strong> • Gerado em: ' + new Date().toLocaleString('pt-BR') + '</p>' +
-        '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px;margin:0 0 16px;">' +
-            '<p style="font-size:11px;margin:0 0 6px;font-weight:600;color:#1e3a5f;">Resumo Consolidado</p>' +
-            '<p style="font-size:10px;margin:2px 0;">🇪🇸 <strong>Espanha:</strong> Receitas ' + money(totalES.income,'€') + ' • Despesas ' + money(totalES.expense,'€') + ' • Aportes ' + money(totalES.aportes,'€') + ' • Resgates ' + money(totalES.resgates,'€') + ' • Saldo <strong>' + money(totalES.balance,'€') + '</strong></p>' +
-            '<p style="font-size:10px;margin:2px 0;">🇧🇷 <strong>Brasil:</strong> Receitas ' + money(totalBR.income,'R$') + ' • Despesas ' + money(totalBR.expense,'R$') + ' • Aportes ' + money(totalBR.aportes,'R$') + ' • Resgates ' + money(totalBR.resgates,'R$') + ' • Saldo <strong>' + money(totalBR.balance,'R$') + '</strong></p>' +
-        '</div>' +
-        block('ES', '🇪🇸 Espanha', '€') +
-        block('BR', '🇧🇷 Brasil', 'R$');
+        const proceed = () => {
+            const opt = {
+                margin: [8, 8, 8, 8],
+                filename: 'FinFam_Relatorio_' + selMonth + '.pdf',
+                image: { type: 'jpeg', quality: 0.95 },
+                html2canvas: {
+                    scale: 2,
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: '#ffffff',
+                    width: 900,
+                    windowWidth: 900,
+                    scrollX: 0,
+                    scrollY: 0,
+                    allowTaint: true,
+                    foreignObjectRendering: false
+                },
+                jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+                pagebreak: { mode: ['css', 'legacy'] }
+            };
 
-    // ============================================================
-    // ABORDAGEM DEFINITIVA — wrapper VISÍVEL, captura síncrona
-    // ============================================================
-    // 1) Overlay escuro atrás (esconde a "piscada")
-    const overlay = document.createElement('div');
-    overlay.id = 'pdfGeneratingOverlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.85);z-index:999998;display:flex;align-items:center;justify-content:center;color:#fff;font-family:Inter,sans-serif;font-size:16px;font-weight:600;';
-    overlay.innerHTML = '<div>📄 Gerando PDF...</div>';
-    document.body.appendChild(overlay);
-
-    // 2) Wrapper VISÍVEL, acima do overlay, no canto superior esquerdo
-    const wrapper = document.createElement('div');
-    wrapper.id = 'pdfRenderTarget';
-    wrapper.style.cssText =
-        'position:fixed;top:0;left:0;' +
-        'width:900px;' +
-        'background:#ffffff;' +
-        'padding:24px;' +
-        'z-index:999999;' +
-        'font-family:Arial,Helvetica,sans-serif;' +
-        'color:#1e293b;' +
-        'box-shadow:0 20px 60px rgba(0,0,0,.3);';
-    wrapper.innerHTML = htmlContent;
-    document.body.appendChild(wrapper);
-
-    // 3) Espera pintura REAL — 3 frames + setTimeout longo
-    const afterPaint = (cb) => {
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                    setTimeout(cb, 400);
+            html2pdf().set(opt).from(idoc.body).save()
+                .then(() => {
+                    iframe.remove();
+                    showToast('✅ PDF gerado com sucesso!', 'success');
+                })
+                .catch(err => {
+                    console.error('exportToPDF:', err);
+                    iframe.remove();
+                    showToast('Erro ao exportar PDF: ' + (err && err.message ? err.message : ''), 'error');
                 });
-            });
-        });
-    };
-
-    afterPaint(() => {
-        const opt = {
-            margin: [8, 8, 8, 8],
-            filename: 'FinFam_Relatorio_' + selMonth + '.pdf',
-            image: { type: 'jpeg', quality: 0.95 },
-            html2canvas: {
-                scale: 2,
-                useCORS: true,
-                logging: false,
-                backgroundColor: '#ffffff',
-                windowWidth: 900,
-                width: 900,
-                scrollX: 0,
-                scrollY: 0,
-                allowTaint: true,
-                foreignObjectRendering: false
-            },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-            pagebreak: { mode: ['css', 'legacy'] }
         };
 
-        html2pdf().set(opt).from(wrapper).save()
-            .then(() => {
-                wrapper.remove();
-                overlay.remove();
-                showToast('✅ PDF gerado com sucesso!', 'success');
-            })
-            .catch(err => {
-                console.error('exportToPDF:', err);
-                wrapper.remove();
-                overlay.remove();
-                showToast('Erro ao exportar PDF: ' + (err && err.message ? err.message : ''), 'error');
-            });
-    });
-};
+        // Espera o iframe renderizar completamente
+        setTimeout(proceed, 800);
+    };
+
     // -------- CSV --------
     const exportToCSV = () => {
         const ym = state.selectedMonth || new Date().toISOString().slice(0,7);
         const txs = state.transactions
             .filter(t => t && t.date && getYearMonth(t.date) === ym)
+            .filter(afetaMes)
             .sort((a,b) => parseDateToYMD(b.date).localeCompare(parseDateToYMD(a.date)));
 
         if (txs.length === 0) { showToast('Nenhum dado para exportar neste mês.', 'info'); return; }
@@ -1354,7 +1227,12 @@ const App = (() => {
             const cat = getCategoryDisplay(t.categoryId);
             const cur = t.country === 'BR' ? 'BRL' : 'EUR';
             const typeStr = t.type === 'expense' ? 'Despesa' : t.type === 'income' ? 'Receita' : 'Investimento';
-            const movement = t.type === 'investment' ? (isResgate(t) ? 'Resgate' : 'Aporte') : '';
+            let movement = '';
+            if (t.type === 'investment') {
+                movement = t.investAction === 'resgate' ? 'Resgate'
+                        : t.investAction === 'resgate_interno' ? 'Resgate Interno'
+                        : 'Aporte';
+            }
             const numVal = (Number(t.amount) || 0).toFixed(2).replace('.', ',');
             const sign = t.type === 'expense' ? '-' : t.type === 'income' ? '+' : (isResgate(t) ? '+' : '-');
             const desc = (t.description || '').replace(/;/g, ',');
@@ -1536,12 +1414,14 @@ const App = (() => {
                 <div class="form-group" id="investActionGroup" style="${isInvestment ? '' : 'display:none;'}">
                     <label class="form-label">Movimento de Investimento</label>
                     <select id="txInvestAction" class="input-field">
-                        <option value="aporte"  ${investAction === 'aporte'  ? 'selected' : ''}>💰 Aporte — guardar na reserva</option>
-                        <option value="resgate" ${investAction === 'resgate' ? 'selected' : ''}>💸 Resgate — usar para pagar contas</option>
+                        <option value="aporte"           ${investAction === 'aporte'           ? 'selected' : ''}>💰 Aporte — guardar na reserva</option>
+                        <option value="resgate"          ${investAction === 'resgate'          ? 'selected' : ''}>💸 Resgate — voltar para o caixa</option>
+                        <option value="resgate_interno"  ${investAction === 'resgate_interno'  ? 'selected' : ''}>🔒 Resgate Interno — só sai do patrimônio</option>
                     </select>
-                    <div style="font-size:11px;color:#475569;margin-top:6px;line-height:1.4">
-                        <strong>Aporte:</strong> sai do Saldo Livre e vai para o Patrimônio.<br>
-                        <strong>Resgate:</strong> volta do Patrimônio para o Saldo Livre.
+                    <div style="font-size:11px;color:#475569;margin-top:6px;line-height:1.5;background:#f8fafc;padding:8px;border-radius:6px;">
+                        <strong>💰 Aporte:</strong> sai do caixa, entra no patrimônio.<br>
+                        <strong>💸 Resgate:</strong> sai do patrimônio, volta ao caixa e conta no mês.<br>
+                        <strong>🔒 Resgate Interno:</strong> sai do patrimônio mas <em>não</em> entra em relatórios nem no caixa do mês.
                     </div>
                 </div>
 
@@ -1660,7 +1540,9 @@ const App = (() => {
 
             const msg = txId ? '✅ Lançamento atualizado!'
                       : type === 'investment'
-                        ? (investAction === 'resgate' ? '💸 Resgate registrado!' : '💰 Aporte registrado!')
+                        ? (investAction === 'resgate' ? '💸 Resgate registrado!'
+                          : investAction === 'resgate_interno' ? '🔒 Resgate Interno registrado!'
+                          : '💰 Aporte registrado!')
                         : '✅ Lançamento registrado!';
             showToast(msg, 'success');
         } catch (err) {
